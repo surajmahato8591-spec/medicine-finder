@@ -1,0 +1,6 @@
+{
+  "name": "MediFinder - Pharmacy & Medicine Availability Locator",
+  "description": "Find real-time medicine stock, nearby pharmacies with interactive map and list views, directions, instant reservations, and reminders.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
