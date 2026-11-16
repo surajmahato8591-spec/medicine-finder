@@ -1,34 +1,27 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { setOptions, importLibrary } from '@googlemaps/js-api-loader';
-import L from 'leaflet';
-import 'leaflet.markercluster';
-import { 
-  Navigation, 
-  Compass, 
-  Phone, 
-  MapPin, 
-  ExternalLink, 
-  Clock, 
-  CheckCircle2, 
-  AlertTriangle,
-  RotateCcw,
-  Sparkles,
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import {
+  Map as GoogleMap,
+  AdvancedMarker,
+  Pin,
+  InfoWindow,
+  Circle,
+  useMap,
+  useMapsLibrary,
+  useAdvancedMarkerRef,
+} from '@vis.gl/react-google-maps';
+import { MarkerClusterer } from '@googlemaps/markerclusterer';
+import {
+  Navigation,
+  Compass,
+  Phone,
+  MapPin,
   Maximize2,
-  Map as MapIcon,
-  Globe,
   Layers,
-  Info
+  AlertTriangle,
 } from 'lucide-react';
 import { Pharmacy, Medicine, SearchFilters } from '../types';
 import { calculateDistance } from '../data/mockData';
-
-const GOOGLE_MAPS_API_KEY = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY || '').trim();
-const hasGoogleMapsKey = Boolean(
-  GOOGLE_MAPS_API_KEY && 
-  GOOGLE_MAPS_API_KEY.startsWith('AIza') && 
-  GOOGLE_MAPS_API_KEY !== 'VITE_GOOGLE_MAPS_API_KEY' && 
-  GOOGLE_MAPS_API_KEY.length >= 25
-);
+import { hasGoogleMapsKey, checkGmpQuotaError } from '../utils/gmpQuota';
 
 interface InteractiveMapProps {
   pharmacies: Pharmacy[];
@@ -37,10 +30,401 @@ interface InteractiveMapProps {
   searchedMedicine?: Medicine | null;
   filters: SearchFilters;
   onOpenDirections: (pharmacy: Pharmacy) => void;
-  onOpenCall: (phone: string) => void;
+  onOpenCall?: (phone: string) => void;
 }
 
-export const InteractiveMap: React.FC<InteractiveMapProps> = ({
+interface RouteOverlayProps {
+  origin: google.maps.LatLngLiteral;
+  destination: google.maps.LatLngLiteral;
+}
+
+const RouteOverlay: React.FC<RouteOverlayProps> = ({ origin, destination }) => {
+  const map = useMap();
+  const routesLib = useMapsLibrary('routes');
+
+  useEffect(() => {
+    if (!map || !routesLib) return;
+
+    let cancelled = false;
+    let activePolylines: google.maps.Polyline[] = [];
+
+    async function computeAndDraw() {
+      if (!routesLib || !map) return;
+      try {
+        const { routes } = await routesLib.Route.computeRoutes({
+          origin,
+          destination,
+          travelMode: 'DRIVING',
+          fields: ['path', 'distanceMeters', 'durationMillis', 'viewport'],
+        });
+
+        if (cancelled) return;
+
+        if (routes && routes.length > 0) {
+          const primaryRoute = routes[0];
+          const polylines = primaryRoute.createPolylines({
+            polylineOptions: {
+              strokeColor: '#0284c7',
+              strokeOpacity: 0.85,
+              strokeWeight: 4,
+            },
+          });
+          polylines.forEach((p) => p.setMap(map));
+          activePolylines = polylines;
+
+          if (primaryRoute.viewport) {
+            map.fitBounds(primaryRoute.viewport, 48);
+          } else {
+            map.panTo(destination);
+          }
+        }
+      } catch (err) {
+        checkGmpQuotaError(err);
+        if (!cancelled && map) {
+          const fallbackLine = new google.maps.Polyline({
+            path: [origin, destination],
+            geodesic: true,
+            strokeColor: '#0284c7',
+            strokeOpacity: 0.75,
+            strokeWeight: 3,
+            map,
+          });
+          activePolylines = [fallbackLine];
+          map.panTo(destination);
+        }
+      }
+    }
+
+    computeAndDraw();
+
+    return () => {
+      cancelled = true;
+      activePolylines.forEach((p) => p.setMap(null));
+    };
+  }, [map, routesLib, origin.lat, origin.lng, destination.lat, destination.lng]);
+
+  return null;
+};
+
+interface MapContentsProps {
+  pharmacies: Pharmacy[];
+  selectedPharmacy: Pharmacy | null;
+  onSelectPharmacy: (pharmacy: Pharmacy) => void;
+  searchedMedicine?: Medicine | null;
+  originLat: number;
+  originLng: number;
+  originName: string;
+  originRadius: number;
+  showRadiusRing: boolean;
+  clusteringEnabled: boolean;
+  onOpenDirections: (pharmacy: Pharmacy) => void;
+  onOpenCall?: (phone: string) => void;
+}
+
+interface PharmacyMarkerItemProps {
+  pharmacy: Pharmacy;
+  isSelected: boolean;
+  searchedMedicine?: Medicine | null;
+  onMarkerChange: (id: string, marker: google.maps.marker.AdvancedMarkerElement | null) => void;
+  onSelect: (pharmacy: Pharmacy) => void;
+}
+
+const PharmacyMarkerItem: React.FC<PharmacyMarkerItemProps> = ({
+  pharmacy,
+  isSelected,
+  searchedMedicine,
+  onMarkerChange,
+  onSelect,
+}) => {
+  const [markerRef, marker] = useAdvancedMarkerRef();
+
+  useEffect(() => {
+    onMarkerChange(pharmacy.id, marker);
+    return () => {
+      onMarkerChange(pharmacy.id, null);
+    };
+  }, [pharmacy.id, marker, onMarkerChange]);
+
+  const inv = searchedMedicine
+    ? pharmacy.inventory.find((i) => i.medicineId === searchedMedicine.id)
+    : pharmacy.inventory[0];
+
+  const isStocked = inv?.inStockStatus === 'In Stock';
+  const isLowStock = inv?.inStockStatus === 'Low Stock';
+
+  const pinBg = isSelected
+    ? '#0284c7'
+    : isStocked
+    ? '#10b981'
+    : isLowStock
+    ? '#f59e0b'
+    : '#94a3b8';
+
+  const borderCol = isSelected
+    ? '#0369a1'
+    : isStocked
+    ? '#047857'
+    : isLowStock
+    ? '#b45309'
+    : '#475569';
+
+  return (
+    <AdvancedMarker
+      ref={markerRef}
+      position={{ lat: pharmacy.lat, lng: pharmacy.lng }}
+      title={pharmacy.name}
+      zIndex={isSelected ? 999 : 10}
+      onClick={() => onSelect(pharmacy)}
+    >
+      <Pin
+        background={pinBg}
+        borderColor={borderCol}
+        glyphColor="#ffffff"
+        glyphText="+"
+        scale={isSelected ? 1.25 : 1}
+      />
+    </AdvancedMarker>
+  );
+};
+
+const MapContents: React.FC<MapContentsProps> = ({
+  pharmacies,
+  selectedPharmacy,
+  onSelectPharmacy,
+  searchedMedicine,
+  originLat,
+  originLng,
+  originName,
+  originRadius,
+  showRadiusRing,
+  clusteringEnabled,
+  onOpenDirections,
+  onOpenCall = (phone: string) => {
+    window.location.href = `tel:${phone}`;
+  },
+}) => {
+  const map = useMap();
+  const clustererRef = useRef<MarkerClusterer | null>(null);
+  const [markers, setMarkers] = useState<
+    Record<string, google.maps.marker.AdvancedMarkerElement>
+  >({});
+  const [infoPharmacyId, setInfoPharmacyId] = useState<string | null>(
+    selectedPharmacy?.id || null
+  );
+
+  // Sync InfoWindow target when selectedPharmacy changes externally
+  useEffect(() => {
+    if (selectedPharmacy) {
+      setInfoPharmacyId(selectedPharmacy.id);
+    }
+  }, [selectedPharmacy]);
+
+  const handleMarkerChange = useCallback(
+    (id: string, marker: google.maps.marker.AdvancedMarkerElement | null) => {
+      setMarkers((prev) => {
+        if (marker) {
+          if (prev[id] === marker) return prev;
+          return { ...prev, [id]: marker };
+        } else {
+          if (!prev[id]) return prev;
+          const next = { ...prev };
+          delete next[id];
+          return next;
+        }
+      });
+    },
+    []
+  );
+
+  // Manage MarkerClusterer lifecycle
+  useEffect(() => {
+    if (!map) return;
+
+    if (clustererRef.current) {
+      clustererRef.current.clearMarkers();
+      clustererRef.current.setMap(null);
+      clustererRef.current = null;
+    }
+
+    const currentMarkers: google.maps.marker.AdvancedMarkerElement[] = [];
+    for (const p of pharmacies) {
+      const m = markers[p.id];
+      if (m) currentMarkers.push(m);
+    }
+
+    if (clusteringEnabled && currentMarkers.length > 0) {
+      const clusterer = new MarkerClusterer({
+        map,
+        markers: currentMarkers,
+      });
+      clustererRef.current = clusterer;
+
+      return () => {
+        clusterer.clearMarkers();
+        clusterer.setMap(null);
+        currentMarkers.forEach((m) => {
+          m.map = map;
+        });
+      };
+    } else {
+      currentMarkers.forEach((m) => {
+        m.map = map;
+      });
+    }
+  }, [map, pharmacies, clusteringEnabled, markers]);
+
+  // Fit bounds on initial load / pharmacy list change when no pharmacy is selected
+  useEffect(() => {
+    if (!map || selectedPharmacy || pharmacies.length === 0) return;
+    const bounds = new google.maps.LatLngBounds();
+    bounds.extend({ lat: originLat, lng: originLng });
+    pharmacies.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
+    map.fitBounds(bounds, 50);
+  }, [map, pharmacies, originLat, originLng, selectedPharmacy]);
+
+  const infoPharmacy = useMemo(
+    () => pharmacies.find((p) => p.id === infoPharmacyId) || null,
+    [pharmacies, infoPharmacyId]
+  );
+  const infoMarker = infoPharmacy ? markers[infoPharmacy.id] || null : null;
+
+  return (
+    <>
+      {/* Origin Beacon Marker */}
+      <AdvancedMarker
+        position={{ lat: originLat, lng: originLng }}
+        title={`Search Origin: ${originName}`}
+        zIndex={1001}
+      >
+        <div className="relative flex items-center justify-center">
+          <div className="w-4 h-4 rounded-full bg-blue-600 ring-4 ring-white shadow-lg z-10" />
+          <div className="absolute w-8 h-8 rounded-full bg-blue-500/35 animate-ping" />
+        </div>
+      </AdvancedMarker>
+
+      {/* Search Radius Circle */}
+      {showRadiusRing && (
+        <Circle
+          center={{ lat: originLat, lng: originLng }}
+          radius={originRadius * 1000}
+          strokeColor="#059669"
+          strokeOpacity={0.8}
+          strokeWeight={1.5}
+          fillColor="#10b981"
+          fillOpacity={0.08}
+        />
+      )}
+
+      {/* Pharmacy AdvancedMarkers */}
+      {pharmacies.map((pharmacy) => (
+        <PharmacyMarkerItem
+          key={pharmacy.id}
+          pharmacy={pharmacy}
+          isSelected={selectedPharmacy?.id === pharmacy.id}
+          searchedMedicine={searchedMedicine}
+          onMarkerChange={handleMarkerChange}
+          onSelect={(p) => {
+            setInfoPharmacyId(p.id);
+            onSelectPharmacy(p);
+          }}
+        />
+      ))}
+
+      {/* InfoWindow anchored to selected AdvancedMarkerElement or position fallback when clustered */}
+      {infoPharmacy && (infoMarker || clusteringEnabled) && (
+        <InfoWindow
+          anchor={infoMarker?.map ? infoMarker : undefined}
+          position={
+            infoMarker?.map ? undefined : { lat: infoPharmacy.lat, lng: infoPharmacy.lng }
+          }
+          maxWidth={280}
+          onCloseClick={() => setInfoPharmacyId(null)}
+        >
+          {(() => {
+            const inv = searchedMedicine
+              ? infoPharmacy.inventory.find((i) => i.medicineId === searchedMedicine.id)
+              : infoPharmacy.inventory[0];
+            const isStocked = inv?.inStockStatus === 'In Stock';
+            const isLowStock = inv?.inStockStatus === 'Low Stock';
+            const dist = calculateDistance(
+              originLat,
+              originLng,
+              infoPharmacy.lat,
+              infoPharmacy.lng
+            );
+
+            return (
+              <div className="p-1 font-sans min-w-[210px]">
+                <div className="flex justify-between items-start gap-2 border-b border-slate-200 pb-1.5">
+                  <div>
+                    <strong className="text-xs text-slate-900 block leading-tight">
+                      {infoPharmacy.name}
+                    </strong>
+                    <span className="text-[11px] text-slate-500">
+                      {infoPharmacy.area} • {dist} km away
+                    </span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0 ${
+                      isStocked
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : isLowStock
+                        ? 'bg-amber-100 text-amber-800'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {inv ? inv.inStockStatus : 'Open'}
+                  </span>
+                </div>
+
+                <div className="my-2 text-xs text-slate-700 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">
+                      {searchedMedicine ? searchedMedicine.name : 'Medicine'}:
+                    </span>
+                    <strong className="text-slate-900">
+                      {inv ? `₹${inv.price.toFixed(2)}` : 'Available'}
+                    </strong>
+                  </div>
+                  <div className="text-[11px] text-slate-500">🕒 {infoPharmacy.openHours}</div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 mt-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenCall(infoPharmacy.phone)}
+                    className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Phone className="w-3 h-3 text-emerald-600" />
+                    <span>Call</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenDirections(infoPharmacy)}
+                    className="px-2 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <Navigation className="w-3 h-3" />
+                    <span>Directions</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+        </InfoWindow>
+      )}
+
+      {/* Real Routes API v2 Overlay when a pharmacy is selected */}
+      {selectedPharmacy && (
+        <RouteOverlay
+          origin={{ lat: originLat, lng: originLng }}
+          destination={{ lat: selectedPharmacy.lat, lng: selectedPharmacy.lng }}
+        />
+      )}
+    </>
+  );
+};
+
+const InteractiveMapWithApi: React.FC<InteractiveMapProps> = ({
   pharmacies,
   selectedPharmacy,
   onSelectPharmacy,
@@ -54,579 +438,108 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
   const originName = filters?.location?.name ?? 'Mira Bhayandar';
   const originRadius = filters?.radiusKm ?? 5;
 
-  const mapContainerRef = useRef<HTMLDivElement>(null);
-  
-  // Google Maps references
-  const googleMapInstanceRef = useRef<google.maps.Map | null>(null);
-  const googleMarkersRef = useRef<google.maps.Marker[]>([]);
-  const userGoogleMarkerRef = useRef<google.maps.Marker | null>(null);
-  const googleCircleRef = useRef<google.maps.Circle | null>(null);
-  const googlePolylineRef = useRef<google.maps.Polyline | null>(null);
-  const googleInfoWindowRef = useRef<google.maps.InfoWindow | null>(null);
+  const map = useMap('main-pharmacy-map');
 
-  // Leaflet references
-  const leafletMapRef = useRef<L.Map | null>(null);
-  const leafletClusterRef = useRef<L.MarkerClusterGroup | null>(null);
-  const leafletUserMarkerRef = useRef<L.Marker | null>(null);
-  const leafletCircleRef = useRef<L.Circle | null>(null);
-  const leafletPolylineRef = useRef<L.Polyline | null>(null);
-  const pharmacyMarkerMapRef = useRef<Map<string, L.Marker>>(new Map());
-
-  const [mapEngine, setMapEngine] = useState<'google' | 'leaflet'>(hasGoogleMapsKey ? 'google' : 'leaflet');
   const [mapType, setMapType] = useState<'roadmap' | 'satellite' | 'terrain'>('roadmap');
   const [showRadiusRing, setShowRadiusRing] = useState(true);
   const [clusteringEnabled, setClusteringEnabled] = useState(true);
-  const [authErrorNotice, setAuthErrorNotice] = useState<string | null>(null);
 
-  // Initialize Leaflet Map
-  const initLeafletMap = useCallback(() => {
-    if (!mapContainerRef.current) return;
-    
-    // Clean up existing Leaflet instance if present
-    if (leafletMapRef.current) {
-      leafletMapRef.current.remove();
-      leafletMapRef.current = null;
-    }
-    
-    mapContainerRef.current.innerHTML = '';
-
-    const map = L.map(mapContainerRef.current, {
-      center: [originLat, originLng],
-      zoom: 14,
-      zoomControl: true,
-    });
-
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; Google / OpenStreetMap / CartoDB',
-      maxZoom: 19,
-    }).addTo(map);
-
-    // Create Leaflet MarkerClusterGroup
-    const clusterGroup = L.markerClusterGroup({
-      showCoverageOnHover: false,
-      zoomToBoundsOnClick: true,
-      spiderfyOnMaxZoom: true,
-      maxClusterRadius: clusteringEnabled ? 45 : 0,
-      spiderLegPolylineOptions: { weight: 1.5, color: '#059669', opacity: 0.6 },
-      iconCreateFunction: (cluster) => {
-        const count = cluster.getChildCount();
-        return L.divIcon({
-          html: `
-            <div class="custom-cluster-pill">
-              <span class="cluster-icon">🏥</span>
-              <span class="cluster-count">${count}</span>
-              <span class="cluster-tag">Pharmacies</span>
-            </div>
-          `,
-          className: 'custom-cluster-badge',
-          iconSize: [count > 9 ? 94 : 86, 32],
-          iconAnchor: [count > 9 ? 47 : 43, 16],
-        });
-      },
-    });
-
-    map.addLayer(clusterGroup);
-    leafletClusterRef.current = clusterGroup;
-    leafletMapRef.current = map;
-    setMapEngine('leaflet');
-  }, [originLat, originLng, clusteringEnabled]);
-
-  // Handle Google Maps Authentication Failure (ApiTargetBlockedMapError, InvalidKeyMapError etc.)
-  useEffect(() => {
-    (window as any).gm_authFailure = () => {
-      console.warn('Google Maps API key blocked, invalid, or unauthorized. Seamlessly falling back to high-res Leaflet map.');
-      setAuthErrorNotice("Google Maps key is invalid or restricted. Showing interactive OpenStreetMap view.");
-      initLeafletMap();
-    };
-
-    return () => {
-      (window as any).gm_authFailure = undefined;
-    };
-  }, [initLeafletMap]);
-
-  // 1. Initialize Map Engine
-  useEffect(() => {
-    let isMounted = true;
-
-    async function initMap() {
-      if (!mapContainerRef.current) return;
-
-      if (mapEngine === 'google' && hasGoogleMapsKey) {
-        try {
-          setOptions({
-            key: GOOGLE_MAPS_API_KEY,
-            v: 'weekly',
-            libraries: ['places', 'geometry'],
-            solutionChannel: 'gmp_mcp_codeassist_v1_aistudio',
-          });
-
-          const { Map, InfoWindow } = await importLibrary('maps');
-          if (!isMounted || !mapContainerRef.current) return;
-
-          mapContainerRef.current.innerHTML = '';
-
-          const mapOptions: google.maps.MapOptions = {
-            center: { lat: originLat, lng: originLng },
-            zoom: 14,
-            mapTypeId: mapType,
-            disableDefaultUI: false,
-            zoomControl: true,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: false,
-            styles: [
-              {
-                featureType: 'poi.medical',
-                elementType: 'geometry',
-                stylers: [{ color: '#f8fafc' }],
-              },
-              {
-                featureType: 'poi.medical',
-                elementType: 'labels.icon',
-                stylers: [{ visibility: 'on' }],
-              },
-              {
-                featureType: 'water',
-                elementType: 'geometry',
-                stylers: [{ color: '#e0f2fe' }],
-              },
-            ],
-          };
-
-          const map = new Map(mapContainerRef.current, mapOptions);
-          googleMapInstanceRef.current = map;
-          googleInfoWindowRef.current = new InfoWindow();
-        } catch (err: any) {
-          console.warn('Google Maps load failure, using fallback map:', err);
-          if (isMounted) {
-            initLeafletMap();
-          }
-        }
-      } else {
-        initLeafletMap();
-      }
-    }
-
-    initMap();
-
-    return () => {
-      isMounted = false;
-      if (leafletMapRef.current) {
-        leafletMapRef.current.remove();
-        leafletMapRef.current = null;
-      }
-    };
-  }, [mapEngine, mapType, initLeafletMap, originLat, originLng]);
-
-  // 2. Update Google Maps elements
-  useEffect(() => {
-    if (mapEngine === 'google' && googleMapInstanceRef.current && window.google) {
-      const map = googleMapInstanceRef.current;
-      const google = window.google;
-
-      // Clear previous markers
-      googleMarkersRef.current.forEach((m) => m.setMap(null));
-      googleMarkersRef.current = [];
-
-      if (userGoogleMarkerRef.current) {
-        userGoogleMarkerRef.current.setMap(null);
-      }
-
-      // User location marker
-      const userMarker = new google.maps.Marker({
-        position: { lat: originLat, lng: originLng },
-        map,
-        title: `Search Origin: ${originName}`,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 9,
-          fillColor: '#2563eb',
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3,
-        },
-      });
-      userGoogleMarkerRef.current = userMarker;
-
-      // Radius Circle
-      if (googleCircleRef.current) {
-        googleCircleRef.current.setMap(null);
-      }
-      if (showRadiusRing) {
-        const circle = new google.maps.Circle({
-          map,
-          center: { lat: originLat, lng: originLng },
-          radius: originRadius * 1000,
-          strokeColor: '#059669',
-          strokeOpacity: 0.8,
-          strokeWeight: 1.5,
-          fillColor: '#10b981',
-          fillOpacity: 0.08,
-        });
-        googleCircleRef.current = circle;
-      }
-
-      const bounds = new google.maps.LatLngBounds();
-      bounds.extend({ lat: originLat, lng: originLng });
-
-      // Add Pharmacy Markers
-      pharmacies.forEach((pharmacy) => {
-        const inv = searchedMedicine
-          ? pharmacy.inventory.find((i) => i.medicineId === searchedMedicine.id)
-          : pharmacy.inventory[0];
-
-        const isStocked = inv?.inStockStatus === 'In Stock';
-        const isLowStock = inv?.inStockStatus === 'Low Stock';
-        const isSelected = selectedPharmacy?.id === pharmacy.id;
-
-        const pinColor = isSelected
-          ? '#0284c7'
-          : isStocked
-          ? '#10b981'
-          : isLowStock
-          ? '#f59e0b'
-          : '#94a3b8';
-
-        const marker = new google.maps.Marker({
-          position: { lat: pharmacy.lat, lng: pharmacy.lng },
-          map,
-          title: pharmacy.name,
-          icon: {
-            path: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
-            fillColor: pinColor,
-            fillOpacity: 1,
-            strokeWeight: 1.5,
-            strokeColor: '#ffffff',
-            scale: 1.8,
-            anchor: new google.maps.Point(12, 22),
-          },
-          zIndex: isSelected ? 999 : 10,
-        });
-
-        bounds.extend({ lat: pharmacy.lat, lng: pharmacy.lng });
-
-        // InfoWindow on Marker Click
-        const dist = calculateDistance(originLat, originLng, pharmacy.lat, pharmacy.lng);
-        const contentString = document.createElement('div');
-        contentString.className = 'p-2.5 font-sans max-w-xs';
-        contentString.innerHTML = `
-          <div style="font-family: system-ui, sans-serif;">
-            <div style="display: flex; justify-content: space-between; align-items: start; gap: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;">
-              <div>
-                <strong style="font-size: 13px; color: #0f172a; display: block;">${pharmacy.name}</strong>
-                <span style="font-size: 11px; color: #64748b;">${pharmacy.area} • ${dist} km away</span>
-              </div>
-              <span style="font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 6px; background-color: ${
-                isStocked ? '#dcfce7' : isLowStock ? '#fef3c7' : '#f1f5f9'
-              }; color: ${isStocked ? '#166534' : isLowStock ? '#92400e' : '#475569'};">
-                ${inv ? inv.inStockStatus : 'Open'}
-              </span>
-            </div>
-            
-            <div style="margin: 8px 0; font-size: 12px; color: #334155;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <span style="color: #64748b;">${searchedMedicine ? searchedMedicine.name : 'Medicine'}:</span>
-                <strong style="color: #0f172a;">${inv ? '₹' + inv.price.toFixed(2) : 'Available'}</strong>
-              </div>
-              <div style="font-size: 11px; color: #64748b;">🕒 ${pharmacy.openHours}</div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px;">
-              <button id="gmap-call-btn-${pharmacy.id}" style="padding: 6px 8px; background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">
-                📞 Call
-              </button>
-              <button id="gmap-route-btn-${pharmacy.id}" style="padding: 6px 8px; background: #059669; color: #ffffff; border: none; border-radius: 8px; font-size: 11px; font-weight: bold; cursor: pointer;">
-                🧭 Directions
-              </button>
-            </div>
-          </div>
-        `;
-
-        marker.addListener('click', () => {
-          onSelectPharmacy(pharmacy);
-          if (googleInfoWindowRef.current) {
-            googleInfoWindowRef.current.setContent(contentString);
-            googleInfoWindowRef.current.open(map, marker);
-
-            setTimeout(() => {
-              const callBtn = document.getElementById(`gmap-call-btn-${pharmacy.id}`);
-              const routeBtn = document.getElementById(`gmap-route-btn-${pharmacy.id}`);
-              if (callBtn) callBtn.onclick = () => onOpenCall(pharmacy.phone);
-              if (routeBtn) routeBtn.onclick = () => onOpenDirections(pharmacy);
-            }, 100);
-          }
-        });
-
-        if (isSelected && googleInfoWindowRef.current) {
-          googleInfoWindowRef.current.setContent(contentString);
-          googleInfoWindowRef.current.open(map, marker);
-          setTimeout(() => {
-            const callBtn = document.getElementById(`gmap-call-btn-${pharmacy.id}`);
-            const routeBtn = document.getElementById(`gmap-route-btn-${pharmacy.id}`);
-            if (callBtn) callBtn.onclick = () => onOpenCall(pharmacy.phone);
-            if (routeBtn) routeBtn.onclick = () => onOpenDirections(pharmacy);
-          }, 100);
-        }
-
-        googleMarkersRef.current.push(marker);
-      });
-
-      // Route Polyline
-      if (googlePolylineRef.current) {
-        googlePolylineRef.current.setMap(null);
-        googlePolylineRef.current = null;
-      }
-
-      if (selectedPharmacy) {
-        const polyline = new google.maps.Polyline({
-          path: [
-            { lat: originLat, lng: originLng },
-            { lat: selectedPharmacy.lat, lng: selectedPharmacy.lng },
-          ],
-          geodesic: true,
-          strokeColor: '#0284c7',
-          strokeOpacity: 0.8,
-          strokeWeight: 4,
-          map,
-        });
-        googlePolylineRef.current = polyline;
-        map.panTo({ lat: selectedPharmacy.lat, lng: selectedPharmacy.lng });
-      } else if (pharmacies.length > 0) {
-        map.fitBounds(bounds, 50);
-      }
-    }
-  }, [pharmacies, selectedPharmacy, searchedMedicine, originLat, originLng, originName, originRadius, showRadiusRing, mapEngine, onOpenCall, onOpenDirections, onSelectPharmacy]);
-
-  // 3. Update Leaflet Map elements
-  useEffect(() => {
-    if (mapEngine === 'leaflet' && leafletMapRef.current && leafletClusterRef.current) {
-      const map = leafletMapRef.current;
-      const clusterGroup = leafletClusterRef.current;
-      
-      clusterGroup.clearLayers();
-      pharmacyMarkerMapRef.current.clear();
-
-      // Remove existing user marker if present
-      if (leafletUserMarkerRef.current) {
-        map.removeLayer(leafletUserMarkerRef.current);
-        leafletUserMarkerRef.current = null;
-      }
-
-      // Add Search Origin User Marker (unclustered so it's always distinct)
-      const userIcon = L.divIcon({
-        className: 'leaflet-user-icon',
-        html: `<div style="background-color: #2563eb; width: 22px; height: 22px; border-radius: 50%; border: 3px solid #ffffff; box-shadow: 0 4px 10px rgba(37,99,235,0.4); display:flex; align-items:center; justify-content:center;"><div style="width:6px; height:6px; background:#fff; border-radius:50%;"></div></div>`,
-        iconSize: [22, 22],
-        iconAnchor: [11, 11],
-      });
-      leafletUserMarkerRef.current = L.marker([originLat, originLng], { icon: userIcon })
-        .bindTooltip(`Search Origin: ${originName}`, { permanent: false, direction: 'top' })
-        .addTo(map);
-
-      // Circle
-      if (leafletCircleRef.current) map.removeLayer(leafletCircleRef.current);
-      if (showRadiusRing) {
-        leafletCircleRef.current = L.circle([originLat, originLng], {
-          radius: originRadius * 1000,
-          color: '#059669',
-          fillColor: '#10b981',
-          fillOpacity: 0.08,
-          weight: 1.5,
-        }).addTo(map);
-      }
-
-      const bounds = L.latLngBounds([[originLat, originLng]]);
-      
-      pharmacies.forEach((p) => {
-        bounds.extend([p.lat, p.lng]);
-        const isSelected = selectedPharmacy?.id === p.id;
-        const inv = searchedMedicine
-          ? p.inventory.find((i) => i.medicineId === searchedMedicine.id)
-          : p.inventory[0];
-        const isStocked = inv?.inStockStatus === 'In Stock';
-        const isLowStock = inv?.inStockStatus === 'Low Stock';
-
-        const color = isSelected
-          ? '#0284c7'
-          : isStocked
-          ? '#059669'
-          : isLowStock
-          ? '#d97706'
-          : '#64748b';
-
-        const icon = L.divIcon({
-          className: 'leaflet-pharmacy-icon',
-          html: `<div style="background-color: ${color}; width: 28px; height: 28px; border-radius: 8px; border: 2px solid #ffffff; display:flex; align-items:center; justify-content:center; color:white; font-weight:bold; font-size:13px; box-shadow: 0 4px 6px rgba(0,0,0,0.25); transform: ${isSelected ? 'scale(1.15)' : 'scale(1)'}; transition: transform 0.2s;">+</div>`,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-        });
-
-        const dist = calculateDistance(originLat, originLng, p.lat, p.lng);
-        const marker = L.marker([p.lat, p.lng], { icon });
-
-        const popupContent = `
-          <div style="font-family: system-ui, sans-serif; min-width: 190px; padding: 4px;">
-            <div style="font-weight: bold; font-size: 13px; color: #0f172a;">${p.name}</div>
-            <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">${p.area} • ${dist} km away</div>
-            <div style="font-size: 11px; margin-bottom: 6px;">
-              <strong>${searchedMedicine ? searchedMedicine.name : 'Stock'}:</strong> 
-              <span style="color: ${isStocked ? '#166534' : isLowStock ? '#92400e' : '#64748b'}; font-weight: 600;">
-                ${inv ? inv.inStockStatus : 'Available'}
-              </span>
-            </div>
-            <div style="font-size: 11px; color: #475569; margin-bottom: 8px;">🕒 ${p.openHours}</div>
-            <div style="display: flex; gap: 6px;">
-              <a href="tel:${p.phone}" style="flex: 1; text-align: center; background: #f1f5f9; padding: 5px 6px; border-radius: 6px; font-size: 11px; font-weight: bold; color: #1e293b; text-decoration: none;">📞 Call</a>
-              <button id="leaflet-route-btn-${p.id}" style="flex: 1; text-align: center; background: #059669; color: #ffffff; padding: 5px 6px; border: none; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer;">🧭 Route</button>
-            </div>
-          </div>
-        `;
-
-        marker.bindPopup(popupContent);
-        marker.on('click', () => {
-          onSelectPharmacy(p);
-          setTimeout(() => {
-            const btn = document.getElementById(`leaflet-route-btn-${p.id}`);
-            if (btn) btn.onclick = () => onOpenDirections(p);
-          }, 50);
-        });
-
-        // Register marker in cluster and lookup map
-        clusterGroup.addLayer(marker);
-        pharmacyMarkerMapRef.current.set(p.id, marker);
-      });
-
-      if (selectedPharmacy) {
-        if (leafletPolylineRef.current) map.removeLayer(leafletPolylineRef.current);
-        leafletPolylineRef.current = L.polyline(
-          [
-            [originLat, originLng],
-            [selectedPharmacy.lat, selectedPharmacy.lng],
-          ],
-          { color: '#0284c7', weight: 4, opacity: 0.85, dashArray: '6, 6' }
-        ).addTo(map);
-
-        const targetMarker = pharmacyMarkerMapRef.current.get(selectedPharmacy.id);
-        if (targetMarker) {
-          clusterGroup.zoomToShowLayer(targetMarker, () => {
-            targetMarker.openPopup();
-          });
-        } else {
-          map.panTo([selectedPharmacy.lat, selectedPharmacy.lng]);
-        }
-      } else {
-        map.fitBounds(bounds, { padding: [40, 40] });
-      }
-    }
-  }, [mapEngine, pharmacies, selectedPharmacy, searchedMedicine, originLat, originLng, originName, originRadius, showRadiusRing, onOpenDirections, onSelectPharmacy]);
-
-  // Map Recenter
   const handleRecenter = () => {
-    if (googleMapInstanceRef.current && mapEngine === 'google') {
-      googleMapInstanceRef.current.panTo({ lat: originLat, lng: originLng });
-      googleMapInstanceRef.current.setZoom(14);
-    } else if (leafletMapRef.current) {
-      leafletMapRef.current.setView([originLat, originLng], 14);
+    if (map) {
+      map.panTo({ lat: originLat, lng: originLng });
+      map.setZoom(14);
     }
   };
 
-  // Map Fit All
   const handleFitAll = () => {
-    if (googleMapInstanceRef.current && mapEngine === 'google' && window.google) {
+    if (map && typeof google !== 'undefined') {
       const bounds = new google.maps.LatLngBounds();
       bounds.extend({ lat: originLat, lng: originLng });
       pharmacies.forEach((p) => bounds.extend({ lat: p.lat, lng: p.lng }));
-      googleMapInstanceRef.current.fitBounds(bounds, 50);
-    } else if (leafletMapRef.current) {
-      const bounds = L.latLngBounds([[originLat, originLng]]);
-      pharmacies.forEach((p) => bounds.extend([p.lat, p.lng]));
-      leafletMapRef.current.fitBounds(bounds, { padding: [40, 40] });
+      map.fitBounds(bounds, 50);
     }
   };
 
   return (
     <div className="relative isolate map-isolated-container w-full h-full min-h-[420px] rounded-2xl overflow-hidden shadow-md border border-slate-200 bg-slate-100 flex flex-col">
-      {/* Map Surface Element */}
-      <div 
-        ref={mapContainerRef} 
-        id="interactive-map-surface"
-        className="w-full h-full min-h-[420px] flex-1 z-0" 
-      />
-
-      {/* Auth Notification Banner if API key needs Maps JS API authorization */}
-      {authErrorNotice && (
-        <div className="absolute top-14 left-3 right-3 sm:right-auto sm:max-w-md z-30 bg-amber-500/95 backdrop-blur-md text-white px-3 py-2 rounded-xl shadow-lg border border-amber-400 text-xs flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 font-medium">
-            <Info className="w-4 h-4 shrink-0 text-amber-100" />
-            <span>OpenStreetMap live view active (Google Maps key restricted).</span>
-          </div>
-          <button 
-            onClick={() => setAuthErrorNotice(null)}
-            className="text-amber-100 hover:text-white font-bold ml-1 text-sm"
-          >
-            ✕
-          </button>
-        </div>
-      )}
+      {/* Google Map Surface */}
+      <div id="interactive-map-surface" className="w-full h-full min-h-[420px] flex-1 z-0">
+        <GoogleMap
+          id="main-pharmacy-map"
+          mapId="DEMO_MAP_ID"
+          defaultCenter={{ lat: originLat, lng: originLng }}
+          defaultZoom={14}
+          mapTypeId={mapType}
+          gestureHandling="greedy"
+          disableDefaultUI={false}
+          zoomControl={true}
+          mapTypeControl={false}
+          streetViewControl={false}
+          fullscreenControl={false}
+          internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <MapContents
+            pharmacies={pharmacies}
+            selectedPharmacy={selectedPharmacy}
+            onSelectPharmacy={onSelectPharmacy}
+            searchedMedicine={searchedMedicine}
+            originLat={originLat}
+            originLng={originLng}
+            originName={originName}
+            originRadius={originRadius}
+            showRadiusRing={showRadiusRing}
+            clusteringEnabled={clusteringEnabled}
+            onOpenDirections={onOpenDirections}
+            onOpenCall={onOpenCall}
+          />
+        </GoogleMap>
+      </div>
 
       {/* Floating Map Controls Top-Left */}
       <div className="absolute top-3 left-3 z-20 flex flex-col gap-2 pointer-events-auto">
-        {/* Layer style & provider toggle */}
         <div className="bg-white/95 backdrop-blur-md rounded-xl p-1 shadow-md border border-slate-200 flex items-center text-xs font-semibold text-slate-700">
-          {mapEngine === 'google' ? (
-            <>
-              <button
-                onClick={() => {
-                  setMapType('roadmap');
-                  if (googleMapInstanceRef.current) googleMapInstanceRef.current.setMapTypeId('roadmap');
-                }}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  mapType === 'roadmap' ? 'bg-emerald-600 text-white shadow-xs' : 'hover:bg-slate-100 text-slate-600'
-                }`}
-              >
-                Roadmap
-              </button>
-              <button
-                onClick={() => {
-                  setMapType('satellite');
-                  if (googleMapInstanceRef.current) googleMapInstanceRef.current.setMapTypeId('satellite');
-                }}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
-                  mapType === 'satellite' ? 'bg-emerald-600 text-white shadow-xs' : 'hover:bg-slate-100 text-slate-600'
-                }`}
-              >
-                Satellite
-              </button>
-            </>
-          ) : (
-            <div className="px-2.5 py-1 text-emerald-800 bg-emerald-50 rounded-lg flex items-center gap-1">
-              <Globe className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Interactive Map</span>
-            </div>
-          )}
-
-          {hasGoogleMapsKey && (
-            <button
-              onClick={() => {
-                if (mapEngine === 'google') {
-                  initLeafletMap();
-                } else {
-                  setMapEngine('google');
-                }
-              }}
-              title="Switch Map Provider"
-              className="ml-1 px-2 py-1 text-[11px] text-slate-500 hover:text-slate-900 border-l border-slate-200 pl-2"
-            >
-              {mapEngine === 'google' ? 'OSM' : 'Google'}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setMapType('roadmap')}
+            className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              mapType === 'roadmap'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            Roadmap
+          </button>
+          <button
+            type="button"
+            onClick={() => setMapType('satellite')}
+            className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              mapType === 'satellite'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            Satellite
+          </button>
+          <button
+            type="button"
+            onClick={() => setMapType('terrain')}
+            className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+              mapType === 'terrain'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'hover:bg-slate-100 text-slate-600'
+            }`}
+          >
+            Terrain
+          </button>
         </div>
 
         {/* Radius Ring & Cluster Toggles Row */}
         <div className="flex items-center gap-1.5">
           <button
+            type="button"
             onClick={() => setShowRadiusRing(!showRadiusRing)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-md border backdrop-blur-md flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold shadow-md border backdrop-blur-md flex items-center gap-1.5 transition-all cursor-pointer ${
               showRadiusRing
                 ? 'bg-emerald-50/95 border-emerald-300 text-emerald-800'
                 : 'bg-white/95 border-slate-200 text-slate-600 hover:bg-slate-50'
@@ -636,23 +549,19 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <span>{filters.radiusKm}km Ring</span>
           </button>
 
-          {mapEngine === 'leaflet' && (
-            <button
-              onClick={() => {
-                setClusteringEnabled(!clusteringEnabled);
-                initLeafletMap();
-              }}
-              title="Toggle pharmacy marker clustering"
-              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold shadow-md border backdrop-blur-md flex items-center gap-1 transition-all ${
-                clusteringEnabled
-                  ? 'bg-emerald-600 border-emerald-700 text-white'
-                  : 'bg-white/95 border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Cluster {clusteringEnabled ? 'On' : 'Off'}</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setClusteringEnabled(!clusteringEnabled)}
+            title="Toggle pharmacy marker clustering"
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-bold shadow-md border backdrop-blur-md flex items-center gap-1 transition-all cursor-pointer ${
+              clusteringEnabled
+                ? 'bg-emerald-600 border-emerald-700 text-white'
+                : 'bg-white/95 border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Cluster {clusteringEnabled ? 'On' : 'Off'}</span>
+          </button>
         </div>
       </div>
 
@@ -660,18 +569,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       <div className="absolute top-3 right-3 z-20 flex flex-col gap-2 pointer-events-auto">
         <button
           id="map-recenter-btn"
+          type="button"
           onClick={handleRecenter}
           title="Recenter to search location"
-          className="p-2.5 bg-white/95 backdrop-blur-md hover:bg-white text-slate-700 hover:text-emerald-600 rounded-xl shadow-md border border-slate-200 transition-colors"
+          className="p-2.5 bg-white/95 backdrop-blur-md hover:bg-white text-slate-700 hover:text-emerald-600 rounded-xl shadow-md border border-slate-200 transition-colors cursor-pointer"
         >
           <Navigation className="w-4 h-4" />
         </button>
 
         <button
           id="map-fit-all-btn"
+          type="button"
           onClick={handleFitAll}
           title="Fit all pharmacies in view"
-          className="p-2.5 bg-white/95 backdrop-blur-md hover:bg-white text-slate-700 hover:text-emerald-600 rounded-xl shadow-md border border-slate-200 transition-colors"
+          className="p-2.5 bg-white/95 backdrop-blur-md hover:bg-white text-slate-700 hover:text-emerald-600 rounded-xl shadow-md border border-slate-200 transition-colors cursor-pointer"
         >
           <Maximize2 className="w-4 h-4" />
         </button>
@@ -680,15 +591,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       {/* Floating Pin Legend Bottom-Left */}
       <div className="absolute bottom-3 left-3 z-20 bg-white/90 backdrop-blur-md px-3 py-2 rounded-xl shadow-md border border-slate-200 text-[11px] font-medium text-slate-700 hidden sm:flex items-center gap-3 pointer-events-auto">
         <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200"></span>
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-emerald-200" />
           <span>In Stock</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200"></span>
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500 ring-2 ring-amber-200" />
           <span>Low Stock</span>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-500 ring-2 ring-sky-200"></span>
+          <span className="w-2.5 h-2.5 rounded-full bg-sky-500 ring-2 ring-sky-200" />
           <span>Selected</span>
         </div>
       </div>
@@ -698,22 +609,56 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         <div className="absolute bottom-3 right-3 sm:right-16 z-20 max-w-xs bg-white rounded-2xl p-3 shadow-xl border border-slate-200 animate-in fade-in slide-in-from-bottom-2 duration-200 pointer-events-auto">
           <div className="flex items-start justify-between gap-2 mb-1.5">
             <div>
-              <h5 className="text-xs font-bold text-slate-900 leading-tight">{selectedPharmacy.name}</h5>
+              <h5 className="text-xs font-bold text-slate-900 leading-tight">
+                {selectedPharmacy.name}
+              </h5>
               <p className="text-[11px] text-slate-500">{selectedPharmacy.area}</p>
             </div>
             <button
+              type="button"
               onClick={() => onOpenDirections(selectedPharmacy)}
-              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 shadow-xs"
+              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 shrink-0 shadow-xs cursor-pointer"
             >
               <Navigation className="w-3 h-3" />
               <span>Route</span>
             </button>
           </div>
           <p className="text-[10px] text-slate-500">
-            {calculateDistance(originLat, originLng, selectedPharmacy.lat, selectedPharmacy.lng)} km from you • {selectedPharmacy.openHours}
+            {calculateDistance(originLat, originLng, selectedPharmacy.lat, selectedPharmacy.lng)}{' '}
+            km from you • {selectedPharmacy.openHours}
           </p>
         </div>
       )}
     </div>
   );
+};
+
+export const InteractiveMap: React.FC<InteractiveMapProps> = (props) => {
+  if (!hasGoogleMapsKey) {
+    return (
+      <div className="relative w-full h-full min-h-[420px] rounded-2xl overflow-hidden shadow-md border border-slate-200 bg-slate-100 flex flex-col items-center justify-center p-6 text-center space-y-3">
+        <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center">
+          <AlertTriangle className="w-6 h-6" />
+        </div>
+        <div className="space-y-1 max-w-sm">
+          <h4 className="text-sm font-bold text-slate-900">Google Maps View Unavailable</h4>
+          <p className="text-xs text-slate-600">
+            The Google Maps Platform API key is not configured in this environment. You can still browse all {props.pharmacies.length} pharmacies in the list view.
+          </p>
+        </div>
+        {props.selectedPharmacy && (
+          <button
+            type="button"
+            onClick={() => props.onOpenDirections(props.selectedPharmacy!)}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5"
+          >
+            <MapPin className="w-3.5 h-3.5" />
+            <span>Open Directions for {props.selectedPharmacy.name}</span>
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  return <InteractiveMapWithApi {...props} />;
 };

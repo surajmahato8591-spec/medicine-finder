@@ -14,11 +14,14 @@ import {
   ArrowRight,
   Sparkles,
   Search,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink,
+  Loader2
 } from 'lucide-react';
 import { Pharmacy, SearchFilters } from '../types';
 import { calculateDistance, POPULAR_LOCATIONS } from '../data/mockData';
 import { InteractiveMap } from './InteractiveMap';
+import { apiService, MapsPlacesResponse } from '../services/api';
 
 interface NearbyPharmaciesPageProps {
   pharmacies: Pharmacy[];
@@ -53,6 +56,29 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
   const [viewMode, setViewMode] = useState<'split' | 'list' | 'map'>('split');
   const [isLocating, setIsLocating] = useState(false);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+
+  // Google Maps Grounded Live Place Discovery state
+  const [mapsDiscoveryQuery, setMapsDiscoveryQuery] = useState('24-hour pharmacies and medical stores nearby');
+  const [isDiscoveringMaps, setIsDiscoveringMaps] = useState(false);
+  const [mapsDiscoveryResult, setMapsDiscoveryResult] = useState<MapsPlacesResponse | null>(null);
+
+  const handleDiscoverGroundedPharmacies = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!mapsDiscoveryQuery.trim() || isDiscoveringMaps) return;
+    setIsDiscoveringMaps(true);
+    try {
+      const res = await apiService.findGroundedPharmacies(
+        mapsDiscoveryQuery,
+        filters.location.lat,
+        filters.location.lng
+      );
+      setMapsDiscoveryResult(res);
+    } catch (err) {
+      console.warn('Maps grounding discovery notice:', err);
+    } finally {
+      setIsDiscoveringMaps(false);
+    }
+  };
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -286,10 +312,10 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
                 <option value="rating">Highest Rated</option>
               </select>
 
-              <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-xs text-xs font-bold">
+              <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-xs text-xs font-bold shrink-0">
                 <button
                   onClick={() => setViewMode('split')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                  className={`hidden lg:block px-2.5 py-1 rounded-lg transition-all ${
                     viewMode === 'split' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -466,7 +492,7 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
 
           {/* Interactive Map */}
           {(viewMode === 'split' || viewMode === 'map') && (
-            <div className={`${viewMode === 'split' ? 'lg:col-span-6' : 'lg:col-span-12'} sticky top-24`}>
+            <div className={`${viewMode === 'split' ? 'lg:col-span-6' : 'lg:col-span-12'} static lg:sticky lg:top-24`}>
               <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-md space-y-3">
                 <div className="flex items-center justify-between px-2">
                   <div className="flex items-center gap-2">
@@ -476,19 +502,116 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
                   <span className="text-[11px] text-slate-400">Click pins for directions</span>
                 </div>
 
-                <div className="h-[620px] rounded-2xl overflow-hidden border border-slate-200">
+                <div className="h-[340px] sm:h-[460px] lg:h-[620px] rounded-2xl overflow-hidden border border-slate-200">
                   <InteractiveMap
                     pharmacies={sorted}
                     filters={filters}
                     selectedPharmacy={selectedPharmacy}
                     onSelectPharmacy={onSelectPharmacy}
                     onOpenDirections={onOpenDirections}
+                    onOpenCall={(phone) => {
+                      window.location.href = `tel:${phone}`;
+                    }}
                   />
                 </div>
               </div>
             </div>
           )}
 
+        </div>
+
+        {/* Live Google Maps Place Discovery (Google Maps Grounding with Gemini 4) */}
+        <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-md border border-slate-200/90 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-[11px] font-bold mb-1">
+                <Sparkles className="w-3 h-3 text-emerald-600" />
+                <span>Gemini 4 + Google Maps Grounding</span>
+              </div>
+              <h2 className="text-base sm:text-lg font-extrabold text-slate-900">
+                Live Google Maps Place Discovery
+              </h2>
+              <p className="text-xs text-slate-500">
+                Discover real-world Google Maps pharmacy listings and user reviews around {filters.location.name}.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleDiscoverGroundedPharmacies} className="flex flex-col sm:flex-row gap-2.5">
+            <input
+              type="text"
+              value={mapsDiscoveryQuery}
+              onChange={(e) => setMapsDiscoveryQuery(e.target.value)}
+              placeholder="e.g., 24-hour chemist, Jan Aushadhi Kendra, pediatric pharmacy..."
+              className="flex-1 px-4 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-medium text-slate-900"
+            />
+            <button
+              type="submit"
+              disabled={!mapsDiscoveryQuery.trim() || isDiscoveringMaps}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shrink-0 cursor-pointer transition-colors"
+            >
+              {isDiscoveringMaps ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Searching Google Maps...</span>
+                </>
+              ) : (
+                <>
+                  <MapPin className="w-4 h-4" />
+                  <span>Discover Live Places</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {mapsDiscoveryResult && (
+            <div className="pt-3 border-t border-slate-100 space-y-4">
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">
+                {mapsDiscoveryResult.reply}
+              </div>
+
+              {mapsDiscoveryResult.mapsPlaces.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {mapsDiscoveryResult.mapsPlaces.map((place, idx) => (
+                    <div
+                      key={`${place.uri}-${idx}`}
+                      className="p-4 rounded-2xl bg-emerald-50/40 border border-emerald-200/80 space-y-2"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <h3 className="text-xs font-extrabold text-slate-900">{place.title}</h3>
+                        <a
+                          href={place.uri}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[11px] font-bold shrink-0"
+                        >
+                          <span>Google Maps</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      </div>
+
+                      {place.reviewSnippets && place.reviewSnippets.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {place.reviewSnippets.map((rev, rIdx) => (
+                            <a
+                              key={`${rev.uri}-${rIdx}`}
+                              href={rev.uri}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 px-2 py-0.5 bg-white hover:bg-slate-50 border border-slate-200 rounded-md text-[10px] font-medium text-slate-700"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>{rev.title}</span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
       </div>

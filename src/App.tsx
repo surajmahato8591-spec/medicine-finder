@@ -43,7 +43,10 @@ import { AuthModal } from './components/AuthModal';
 import { OrderRequestModal } from './components/OrderRequestModal';
 import { StockNotificationModal } from './components/StockNotificationModal';
 import { DirectionsModal } from './components/DirectionsModal';
+import { APIProvider } from '@vis.gl/react-google-maps';
+import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from './utils/gmpQuota';
 import { AiPharmacistModal } from './components/AiPharmacistModal';
+import { Sparkles, Bot, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   // Navigation active tab - always starts at 'home'
@@ -111,6 +114,25 @@ export default function App() {
   const [pendingSearchQuery, setPendingSearchQuery] = useState<string | null>(null);
   const [showPharmacyPortalModal, setShowPharmacyPortalModal] = useState(false);
   const [showAiPharmacistModal, setShowAiPharmacistModal] = useState(false);
+  const [aiModalTab, setAiModalTab] = useState<'chat' | 'symptom' | 'prescription' | 'interactions' | 'maps-ai'>('chat');
+  const [aiModalMedicine, setAiModalMedicine] = useState<Medicine | null>(null);
+  const [gmpQuotaExceeded, setGmpQuotaExceeded] = useState(false);
+
+  const handleOpenAiPharmacist = (
+    med?: Medicine | null,
+    tab: 'chat' | 'symptom' | 'prescription' | 'interactions' | 'maps-ai' = 'chat'
+  ) => {
+    setAiModalMedicine(med || null);
+    setAiModalTab(tab);
+    setShowAiPharmacistModal(true);
+  };
+
+  // Listen to Tier 1 & Tier 2 Google Maps quota exhaustion events (Demo Key)
+  useEffect(() => {
+    const onQuotaExceeded = () => setGmpQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', onQuotaExceeded);
+    return () => window.removeEventListener('gmp-quota-exceeded', onQuotaExceeded);
+  }, []);
 
   // Active Order Context
   const [orderPharmacy, setOrderPharmacy] = useState<Pharmacy | null>(null);
@@ -519,9 +541,25 @@ export default function App() {
   // Fallback user object for patient views if user is patient
   const activeUser = currentUser || DEMO_USERS.patient;
 
-  return (
+  const appContent = (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-emerald-500 selection:text-white font-sans">
-      
+      {gmpQuotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
+
       {/* Toast Notification Banner */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-[10000] bg-slate-900 text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-2 animate-in slide-in-from-bottom-4 duration-200">
@@ -718,6 +756,7 @@ export default function App() {
           onClose={() => setShowMedicineDetailsModal(false)}
           onSelectPharmacy={handleSelectPharmacy}
           onOpenOrder={handleOpenOrder}
+          onOpenAiPharmacist={(med, tab) => handleOpenAiPharmacist(med, tab)}
         />
       )}
 
@@ -778,6 +817,9 @@ export default function App() {
           onClose={() => setShowAiPharmacistModal(false)}
           medicines={medicines}
           pharmacies={pharmacies}
+          initialTab={aiModalTab}
+          initialMedicine={aiModalMedicine}
+          userLocation={filters.location}
           onSelectMedicine={(med) => {
             handleSelectMedicine(med);
             handleInitiateSearchFromHome(med.name);
@@ -786,6 +828,53 @@ export default function App() {
           onOpenDirections={handleOpenDirections}
         />
       )}
+
+      {/* Floating AI Assistant Trigger */}
+      <button
+        id="floating-ai-assistant-btn"
+        onClick={() => handleOpenAiPharmacist(null, 'chat')}
+        className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center justify-center gap-2 p-3 sm:px-4 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-700 text-white rounded-full sm:rounded-2xl shadow-xl shadow-emerald-950/25 hover:shadow-emerald-950/35 hover:scale-105 transition-all duration-200 cursor-pointer group border border-emerald-400/40"
+        title="Consult AI Pharmacist & Scan Rx"
+        aria-label="Open AI Pharmacist"
+      >
+        <div className="relative shrink-0">
+          <Sparkles className="w-5 h-5 text-amber-300 group-hover:rotate-12 transition-transform" />
+          <span className="absolute -top-1 -right-1 flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+          </span>
+        </div>
+        <div className="text-left hidden sm:block">
+          <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 leading-none">Gemini 4 AI</p>
+          <p className="text-xs font-bold leading-tight">AI Pharmacist</p>
+        </div>
+      </button>
+
+      {/* Global Toast Notification */}
+      {toastMessage && (
+        <div 
+          id="global-toast-notification"
+          className="fixed top-5 right-4 sm:top-6 sm:right-6 z-[10001] max-w-sm bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-2.5 animate-in slide-in-from-top-3 duration-200"
+        >
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          <span className="leading-snug">{toastMessage}</span>
+        </div>
+      )}
     </div>
   );
+
+  if (hasGoogleMapsKey) {
+    return (
+      <APIProvider
+        apiKey={GOOGLE_MAPS_API_KEY}
+        libraries={['places', 'routes', 'marker', 'geometry']}
+        language="en"
+        region="IN"
+      >
+        {appContent}
+      </APIProvider>
+    );
+  }
+
+  return appContent;
 }

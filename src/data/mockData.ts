@@ -1,4 +1,4 @@
-import { Medicine, Pharmacy, UserProfile, MedicineReminder } from '../types';
+import type { Medicine, Pharmacy, UserProfile, MedicineReminder } from '../types.ts';
 
 export const POPULAR_LOCATIONS = [
   { name: 'Mira Bhayandar, Maharashtra', lat: 19.2952, lng: 72.8544 },

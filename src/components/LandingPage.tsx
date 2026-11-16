@@ -17,7 +17,10 @@ import {
   Lock,
   Compass,
   Heart,
-  Users
+  Users,
+  Sparkles,
+  Bot,
+  FileText
 } from 'lucide-react';
 import { SearchFilters, Medicine, Pharmacy, UserRole } from '../types';
 import { POPULAR_LOCATIONS } from '../data/mockData';
@@ -47,6 +50,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onSelectMedicine,
   onOpenAuth,
   onNavigate,
+  onOpenAiPharmacist,
 }) => {
   const [medicineQuery, setMedicineQuery] = useState(filters?.query || 'Paracetamol 650mg');
   const [locationName, setLocationName] = useState(filters?.location?.name || 'Mira Bhayandar, Maharashtra');
@@ -191,10 +195,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#0596690a_1px,transparent_1px),linear-gradient(to_bottom,#0596690a_1px,transparent_1px)] bg-[size:3rem_3rem] pointer-events-none"></div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="flex flex-col-reverse lg:flex-row items-center gap-8 lg:gap-12">
+          <div className="hero-section-container w-full flex flex-col-reverse lg:flex-row flex-wrap items-center gap-y-8 lg:gap-y-0">
             
             {/* Left Headline & Search Form */}
-            <div className="w-full lg:w-7/12 space-y-6">
+            <div className="w-full lg:w-1/2 space-y-6 lg:pr-6">
               
               {/* Trust Badge */}
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-100/90 border border-emerald-300 text-emerald-900 text-xs font-bold shadow-xs">
@@ -432,20 +436,48 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                 </form>
               </div>
 
+              {/* AI Health & Pharmacist Assistant Banner */}
+              {onOpenAiPharmacist && (
+                <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/10 border border-emerald-300/60 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white flex items-center justify-center shrink-0 shadow-xs">
+                      <Sparkles className="w-5 h-5 text-amber-200" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-extrabold text-xs sm:text-sm text-slate-900">AI Clinical Suite & Rx Scanner</span>
+                        <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                          Gemini 4
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600">Scan doctor prescriptions with OCR, match symptoms, and check drug interactions.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenAiPharmacist}
+                    className="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap transition-colors"
+                  >
+                    <Bot className="w-3.5 h-3.5" />
+                    <span>Launch AI Pharmacist</span>
+                  </button>
+                </div>
+              )}
+
             </div>
 
             {/* Right Side: STATIC DECORATIVE PHARMACY / MAP RADAR ILLUSTRATION (No real pharmacy data, no live stock) */}
-            <div className="w-full lg:w-5/12 flex items-center justify-center">
-              <div className="relative w-full max-w-sm sm:max-w-md mx-auto">
+            <div className="w-full lg:w-1/2 flex items-center justify-center lg:pl-6">
+              <div className="relative w-full max-w-sm sm:max-w-md lg:max-w-lg mx-auto">
                 
                 <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/20 to-teal-500/30 rounded-3xl transform rotate-2 scale-105 filter blur-xl"></div>
                 
-                <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-6 shadow-2xl text-white border border-emerald-400/30 overflow-hidden space-y-5">
+                <div className="relative bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950 rounded-3xl p-4 sm:p-6 shadow-2xl text-white border border-emerald-400/30 overflow-hidden space-y-3 sm:space-y-5">
                   
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
-                        <Store className="w-5 h-5" />
+                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center text-emerald-400">
+                        <Store className="w-4 h-4 sm:w-5 sm:h-5" />
                       </div>
                       <div>
                         <h4 className="text-xs font-bold text-white tracking-wide">Chemist Radar Directory</h4>
@@ -460,7 +492,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
 
                   {/* Static Decorative Map Canvas Graphic */}
-                  <div className="rounded-2xl overflow-hidden h-64 border border-slate-700/80 shadow-inner relative isolate bg-slate-950 flex flex-col items-center justify-center p-4 text-center">
+                  <div className="rounded-2xl overflow-hidden min-h-[200px] sm:min-h-[240px] border border-slate-700/80 shadow-inner relative isolate bg-slate-950 flex flex-col items-center justify-center p-3 sm:p-4 text-center">
                     
                     {/* Decorative Radar Lines */}
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-20">

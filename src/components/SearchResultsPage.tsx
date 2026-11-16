@@ -289,10 +289,10 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
             </select>
 
             {/* View Mode Switcher */}
-            <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold">
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold shrink-0">
               <button
                 onClick={() => setViewMode('split')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`hidden lg:block px-2.5 py-1 rounded-lg transition-all ${
                   viewMode === 'split' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -304,7 +304,7 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
                   viewMode === 'list' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                List Only
+                List
               </button>
               <button
                 onClick={() => setViewMode('map')}
@@ -312,7 +312,7 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
                   viewMode === 'map' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Map Only
+                Map
               </button>
             </div>
           </div>
@@ -533,7 +533,7 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
 
           {/* Interactive Map Column */}
           {(viewMode === 'split' || viewMode === 'map') && (
-            <div className={`${viewMode === 'split' ? 'lg:col-span-6' : 'lg:col-span-12'} sticky top-24`}>
+            <div className={`${viewMode === 'split' ? 'lg:col-span-6' : 'lg:col-span-12'} static lg:sticky lg:top-24`}>
               <div className="bg-white rounded-3xl p-4 border border-slate-200 shadow-md space-y-3">
                 <div className="flex items-center justify-between px-2">
                   <div className="flex items-center gap-2">
@@ -543,7 +543,7 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
                   <span className="text-[11px] text-slate-400">Click pins for details</span>
                 </div>
 
-                <div className="h-[600px] rounded-2xl overflow-hidden border border-slate-200">
+                <div className="h-[340px] sm:h-[460px] lg:h-[600px] rounded-2xl overflow-hidden border border-slate-200">
                   <InteractiveMap
                     pharmacies={sortedList}
                     filters={filters}

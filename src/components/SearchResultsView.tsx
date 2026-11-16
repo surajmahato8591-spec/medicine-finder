@@ -456,7 +456,7 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
 
           {/* Map Column */}
           {(viewMode === 'split' || viewMode === 'map') && (
-            <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-7 sticky top-24' : 'lg:col-span-12'} h-[480px] sm:h-[540px] lg:h-[620px]`}>
+            <div className={`${viewMode === 'split' ? 'lg:col-span-6 xl:col-span-7 static lg:sticky lg:top-24' : 'lg:col-span-12'} h-[340px] sm:h-[460px] lg:h-[620px]`}>
               <InteractiveMap
                 pharmacies={sortedList}
                 selectedPharmacy={selectedPharmacy}

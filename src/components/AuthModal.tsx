@@ -157,10 +157,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[10000] overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-[10000] overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">
       <div 
         id="auth-modal-container"
-        className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150 relative"
+        className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-150 relative max-h-[92vh] flex flex-col"
       >
         {/* Close Button */}
         <button
@@ -170,8 +170,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Modal Top Banner */}
-        <div className="pt-7 pb-4 px-6 text-center bg-gradient-to-b from-emerald-50 via-teal-50/40 to-white">
+        <div className="overflow-y-auto flex-1">
+          {/* Modal Top Banner */}
+          <div className="pt-7 pb-4 px-6 text-center bg-gradient-to-b from-emerald-50 via-teal-50/40 to-white">
           <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-lg shadow-emerald-500/20 mb-2">
             <PlusCircle className="w-7 h-7" />
           </div>
@@ -412,6 +413,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </span>
             )}
           </div>
+        </div>
         </div>
       </div>
     </div>
