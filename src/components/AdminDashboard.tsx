@@ -100,7 +100,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleCreateMedicine = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMedName.trim() || !newMedGeneric.trim()) {
-      alert('Please fill in required medicine name and generic formula');
+      onShowToast('Please fill in required medicine name and generic formula');
       return;
     }
 
@@ -475,7 +475,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <button
                             type="button"
                             onClick={() => {
-                              onTogglePharmacyVerification(pharmacy.id);
+                              const nextStatus = pharmacy.isVerified ? 'rejected' : 'verified';
+                              onTogglePharmacyVerification(pharmacy.id, nextStatus);
                               onShowToast(
                                 pharmacy.isVerified
                                   ? `Verification revoked for ${pharmacy.name}`

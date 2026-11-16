@@ -1,24 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Store, 
   CheckCircle2, 
   Upload, 
-  MapPin, 
-  Clock,
-  ShieldCheck,
   Navigation,
   Phone,
-  Pill,
-  BookmarkCheck
+  Pill
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Pharmacy, Medicine, PharmacyMedicineInventory, OrderRequest } from '../types';
+import { Pharmacy, Medicine, PharmacyMedicineInventory, OrderRequest, UserProfile } from '../types';
 
 interface OrderRequestModalProps {
   pharmacy: Pharmacy | null;
   medicine: Medicine | null;
   inventory?: PharmacyMedicineInventory;
+  currentUser?: UserProfile | null;
   onClose: () => void;
   onSubmitOrder: (order: OrderRequest) => void;
 }
@@ -27,20 +24,26 @@ export const OrderRequestModal: React.FC<OrderRequestModalProps> = ({
   pharmacy,
   medicine,
   inventory,
+  currentUser,
   onClose,
   onSubmitOrder,
 }) => {
-  if (!pharmacy || !medicine) return null;
-
-  const unitPrice = inventory ? inventory.price : medicine.defaultPrice;
   const [quantity, setQuantity] = useState(1);
-  const [customerName, setCustomerName] = useState('Suraj Mahato');
-  const [customerPhone, setCustomerPhone] = useState('+91 98765 43210');
+  const [customerName, setCustomerName] = useState(currentUser?.name || 'Patient');
+  const [customerPhone, setCustomerPhone] = useState(currentUser?.phone || '+91 98765 43210');
   const [notes, setNotes] = useState('');
   const [prescriptionUploaded, setPrescriptionUploaded] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [createdReservationId, setCreatedReservationId] = useState('');
 
+  useEffect(() => {
+    if (currentUser?.name) setCustomerName(currentUser.name);
+    if (currentUser?.phone) setCustomerPhone(currentUser.phone);
+  }, [currentUser]);
+
+  if (!pharmacy || !medicine) return null;
+
+  const unitPrice = inventory ? inventory.price : medicine.defaultPrice;
   const totalAmount = unitPrice * quantity;
 
   const handleSubmit = (e: React.FormEvent) => {

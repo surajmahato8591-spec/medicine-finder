@@ -317,8 +317,15 @@ export const SearchMedicinePage: React.FC<SearchMedicinePageProps> = ({
                     type="text"
                     value={locationName}
                     onChange={(e) => {
-                      setLocationName(e.target.value);
+                      const val = e.target.value;
+                      setLocationName(val);
                       setShowLocationDropdown(true);
+                      const matchedLoc = POPULAR_LOCATIONS.find((l) =>
+                        l.name.toLowerCase().includes(val.trim().toLowerCase())
+                      );
+                      if (matchedLoc && val.trim().length >= 3) {
+                        setFilters((prev) => ({ ...prev, location: matchedLoc }));
+                      }
                     }}
                     onFocus={() => setShowLocationDropdown(true)}
                     placeholder="Enter city or area"

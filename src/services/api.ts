@@ -73,6 +73,7 @@ export interface MapsPlacesResponse {
   reply: string;
   mapsPlaces: GroundedMapsPlace[];
   isFallback?: boolean;
+  apiNotice?: string;
 }
 
 export const apiService = {
@@ -202,7 +203,7 @@ export const apiService = {
   async askAiPharmacist(
     message: string,
     medicineName?: string
-  ): Promise<{ reply: string; sources: GroundedWebSource[] }> {
+  ): Promise<{ reply: string; sources: GroundedWebSource[]; isFallback?: boolean; apiNotice?: string }> {
     try {
       const res = await fetch('/api/ai/pharmacist', {
         method: 'POST',
@@ -214,6 +215,8 @@ export const apiService = {
         return {
           reply: data.reply,
           sources: Array.isArray(data.sources) ? data.sources : [],
+          isFallback: Boolean(data.isFallback),
+          apiNotice: typeof data.apiNotice === 'string' ? data.apiNotice : undefined,
         };
       }
       throw new Error(data.message || 'AI request returned no text');
@@ -227,6 +230,8 @@ export const apiService = {
           `**Generic Equivalents**: Consult your local pharmacist for bio-equivalent generic formulations that offer substantial cost savings.\n\n` +
           `*Note: For emergency health concerns, please consult a registered medical professional.*`,
         sources: [],
+        isFallback: true,
+        apiNotice: 'Unable to reach live AI service; showing local clinical overview.',
       };
     }
   },
@@ -249,6 +254,7 @@ export const apiService = {
           reply: data.reply,
           mapsPlaces: Array.isArray(data.mapsPlaces) ? data.mapsPlaces : [],
           isFallback: Boolean(data.isFallback),
+          apiNotice: typeof data.apiNotice === 'string' ? data.apiNotice : undefined,
         };
       }
       throw new Error(data.message || 'Maps grounding request failed');

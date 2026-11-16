@@ -31,8 +31,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialRole = 'patient',
   notice = null,
 }) => {
-  if (!isOpen) return null;
-
   const [isRegister, setIsRegister] = useState(initialRegister);
   const [selectedRole, setSelectedRole] = useState<UserRole>(initialRole);
   const [email, setEmail] = useState('user@medifinder.demo');
@@ -40,12 +38,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [name, setName] = useState('Rahul Verma');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [resetNotice, setResetNotice] = useState<string | null>(null);
 
   const [selectedPharmaAccount, setSelectedPharmaAccount] = useState<'PH001' | 'PH002' | 'PH003'>('PH001');
 
   useEffect(() => {
     setIsRegister(initialRegister);
     setSelectedRole(initialRole);
+    setResetNotice(null);
     if (initialRole === 'admin') {
       setEmail('surajmahato8591@gmail.com');
       setPassword('123456');
@@ -61,6 +61,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setName('Rahul Verma');
     }
   }, [initialRegister, initialRole, isOpen]);
+
+  if (!isOpen) return null;
 
   const handleRoleChange = (role: UserRole) => {
     setSelectedRole(role);
@@ -353,12 +355,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </label>
               <button
                 type="button"
-                onClick={() => alert('Password reset link sent to your email!')}
-                className="font-bold text-emerald-600 hover:text-emerald-700"
+                onClick={() =>
+                  setResetNotice(`Password reset instructions sent to ${email || 'your email'}.`)
+                }
+                className="font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer"
               >
                 Forgot Password?
               </button>
             </div>
+
+            {resetNotice && (
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] font-semibold text-emerald-800">
+                {resetNotice}
+              </div>
+            )}
 
             <button
               id="auth-submit-btn"

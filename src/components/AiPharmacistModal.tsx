@@ -174,6 +174,7 @@ interface ChatMessage {
   timestamp: string;
   structuredData?: any;
   sources?: GroundedWebSource[];
+  apiNotice?: string;
 }
 
 export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
@@ -305,12 +306,13 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
     setIsLoadingChat(true);
 
     try {
-      const { reply, sources } = await apiService.askAiPharmacist(userMsgText);
+      const { reply, sources, apiNotice } = await apiService.askAiPharmacist(userMsgText);
       const aiMsg: ChatMessage = {
         id: `ai-${Date.now()}`,
         sender: 'ai',
         text: reply,
         sources,
+        apiNotice,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, aiMsg]);
@@ -535,6 +537,12 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
                       <div className="whitespace-pre-wrap font-sans font-medium text-white">{msg.text}</div>
                     ) : (
                       <>
+                        {msg.apiNotice && (
+                          <div className="mb-2 p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-1.5">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                            <span>{msg.apiNotice}</span>
+                          </div>
+                        )}
                         <FormattedClinicalMessage text={msg.text} />
                         {msg.sources && msg.sources.length > 0 && (
                           <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5">
@@ -741,7 +749,7 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
                 <div className="space-y-2">
                   <h5 className="text-xs font-bold text-slate-700">Available In Nearby Pharmacies:</h5>
                   <div className="space-y-2">
-                    {symptomResult.matchedMedicines.map((med) => (
+                    {(symptomResult.matchedMedicines || []).map((med) => (
                       <div
                         key={med.id}
                         className="p-3 bg-white border border-slate-200 rounded-xl flex items-center justify-between hover:border-emerald-300 transition-colors"
@@ -873,7 +881,7 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
                 <div className="space-y-2">
                   <h5 className="font-bold text-slate-800 text-xs">Extracted Medications:</h5>
                   <div className="space-y-2">
-                    {prescriptionResult.medicines.map((m, idx) => (
+                    {(prescriptionResult.medicines || []).map((m, idx) => (
                       <div key={idx} className="p-3.5 bg-white border border-slate-200 rounded-xl flex items-center justify-between">
                         <div className="space-y-1">
                           <p className="font-extrabold text-slate-900 text-xs">{m.medicineName}</p>
@@ -1013,9 +1021,10 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
                 {/* Overall Safety Rating Card */}
                 <div
                   className={`p-4 rounded-2xl border flex items-start gap-3 ${
-                    interactionResult.overallSafetyLevel.toLowerCase().includes('severe')
+                    (interactionResult.overallSafetyLevel || '').toLowerCase().includes('severe')
                       ? 'bg-red-50 border-red-200 text-red-900'
-                      : interactionResult.overallSafetyLevel.toLowerCase().includes('moderate') || interactionResult.overallSafetyLevel.toLowerCase().includes('caution')
+                      : (interactionResult.overallSafetyLevel || '').toLowerCase().includes('moderate') ||
+                        (interactionResult.overallSafetyLevel || '').toLowerCase().includes('caution')
                       ? 'bg-amber-50 border-amber-200 text-amber-900'
                       : 'bg-emerald-50 border-emerald-200 text-emerald-900'
                   }`}
@@ -1023,7 +1032,9 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
                   <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <span className="font-extrabold text-sm uppercase">Overall Safety: {interactionResult.overallSafetyLevel}</span>
+                      <span className="font-extrabold text-sm uppercase">
+                        Overall Safety: {interactionResult.overallSafetyLevel || 'Moderate Caution'}
+                      </span>
                     </div>
                     <p className="text-xs leading-relaxed">{interactionResult.summary}</p>
                   </div>
@@ -1125,6 +1136,12 @@ export const AiPharmacistModal: React.FC<AiPharmacistModalProps> = ({
 
             {mapsAiResult && (
               <div className="space-y-4 pt-3 border-t border-slate-100 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                {mapsAiResult.apiNotice && (
+                  <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-[11px] flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                    <span>{mapsAiResult.apiNotice}</span>
+                  </div>
+                )}
                 <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs">
                   <FormattedClinicalMessage text={mapsAiResult.reply} />
                 </div>

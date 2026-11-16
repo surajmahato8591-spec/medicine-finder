@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   INITIAL_PHARMACIES, 
   INITIAL_MEDICINES, 
-  INITIAL_USER, 
   DEMO_USERS,
   POPULAR_LOCATIONS 
 } from './data/mockData';
@@ -25,7 +24,6 @@ import { Footer } from './components/Footer';
 
 // Pages & Views
 import { LandingPage } from './components/LandingPage';
-import { HeroSection } from './components/HeroSection';
 import { HowItWorks } from './components/HowItWorks';
 import { SearchMedicinePage } from './components/SearchMedicinePage';
 import { SearchResultsPage } from './components/SearchResultsPage';
@@ -46,7 +44,7 @@ import { DirectionsModal } from './components/DirectionsModal';
 import { APIProvider } from '@vis.gl/react-google-maps';
 import { GOOGLE_MAPS_API_KEY, hasGoogleMapsKey } from './utils/gmpQuota';
 import { AiPharmacistModal } from './components/AiPharmacistModal';
-import { Sparkles, Bot, CheckCircle2 } from 'lucide-react';
+import { Sparkles, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
   // Navigation active tab - always starts at 'home'
@@ -91,7 +89,6 @@ export default function App() {
     radiusKm: 5,
     stockFilter: 'all',
     openNowOnly: false,
-    deliveryOnly: false,
     is24x7Only: false,
     sortBy: 'distance',
   });
@@ -141,11 +138,26 @@ export default function App() {
 
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   const showToast = (msg: string) => {
+    if (toastTimerRef.current) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3500);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 3500);
   };
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   // Sync user changes to localStorage when currentUser changes
   useEffect(() => {
@@ -175,16 +187,17 @@ export default function App() {
 
   // Synchronize active medicine when filters query changes
   useEffect(() => {
-    if (filters.query) {
-      const match = medicines.find(
-        (m) =>
-          m.name.toLowerCase().includes(filters.query.toLowerCase()) ||
-          m.genericName.toLowerCase().includes(filters.query.toLowerCase())
-      );
-      if (match) {
-        setSelectedMedicine(match);
-      }
+    const trimmed = filters.query.trim().toLowerCase();
+    if (!trimmed) {
+      setSelectedMedicine(null);
+      return;
     }
+    const match = medicines.find(
+      (m) =>
+        m.name.toLowerCase().includes(trimmed) ||
+        m.genericName.toLowerCase().includes(trimmed)
+    );
+    setSelectedMedicine(match || null);
   }, [filters.query, medicines]);
 
   // Protected Route Guard
@@ -348,13 +361,36 @@ export default function App() {
   };
 
   // Handle "Notify Me When In Stock"
-  const handleOpenStockNotification = (medicine: Medicine) => {
+  const handleOpenStockNotification = (medicineOrName: Medicine | string) => {
     if (!currentUser) {
       setAuthNotice('Please login to set up stock restock notifications.');
       setShowAuthModal(true);
       return;
     }
-    setSelectedMedicine(medicine);
+    let resolvedMedicine: Medicine;
+    if (typeof medicineOrName === 'string') {
+      const queryLower = medicineOrName.trim().toLowerCase();
+      const matched = medicines.find(
+        (m) => m.name.toLowerCase() === queryLower || m.name.toLowerCase().includes(queryLower)
+      );
+      resolvedMedicine = matched || {
+        id: `med-custom-${Date.now()}`,
+        name: medicineOrName.trim() || 'Requested Medicine',
+        genericName: medicineOrName.trim() || 'Standard Formulation',
+        category: 'Pain Relief',
+        form: 'Tablet',
+        dosage: 'Standard',
+        packSize: '1 Pack',
+        defaultPrice: 20,
+        description: '',
+        uses: [],
+        sideEffects: [],
+        requiresPrescription: false,
+      };
+    } else {
+      resolvedMedicine = medicineOrName;
+    }
+    setSelectedMedicine(resolvedMedicine);
     setShowStockNotificationModal(true);
   };
 
@@ -456,12 +492,24 @@ export default function App() {
     showToast(`Notification active for ${alert.medicineName}`);
   };
 
-  // Handle Admin Pharmacy Verification Toggle
-  const handleTogglePharmacyVerification = (pharmacyId: string) => {
+  // Handle Admin Pharmacy Verification Toggle / Approve / Reject
+  const handleTogglePharmacyVerification = (pharmacyId: string, status?: 'verified' | 'rejected') => {
     setPharmacies((prev) =>
-      prev.map((p) =>
-        p.id === pharmacyId ? { ...p, isVerified: !p.isVerified } : p
-      )
+      prev.map((p) => {
+        if (p.id !== pharmacyId) return p;
+        if (status === 'verified') {
+          return { ...p, isVerified: true, verificationStatus: 'verified' };
+        }
+        if (status === 'rejected') {
+          return { ...p, isVerified: false, verificationStatus: 'rejected' };
+        }
+        const nextVerified = !p.isVerified;
+        return {
+          ...p,
+          isVerified: nextVerified,
+          verificationStatus: nextVerified ? 'verified' : 'rejected',
+        };
+      })
     );
   };
 
@@ -538,8 +586,15 @@ export default function App() {
     }
   };
 
-  // Fallback user object for patient views if user is patient
-  const activeUser = currentUser || DEMO_USERS.patient;
+  const isAnyModalOpen =
+    showPharmacyDetailsModal ||
+    showMedicineDetailsModal ||
+    showDirectionsModal ||
+    showOrderModal ||
+    showStockNotificationModal ||
+    showAuthModal ||
+    showPharmacyPortalModal ||
+    showAiPharmacistModal;
 
   const appContent = (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900 selection:bg-emerald-500 selection:text-white font-sans">
@@ -560,14 +615,6 @@ export default function App() {
         </div>
       )}
 
-      {/* Toast Notification Banner */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[10000] bg-slate-900 text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-2 animate-in slide-in-from-bottom-4 duration-200">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
       {/* Top Main Navigation */}
       <Navbar
         activeTab={activeTab}
@@ -575,7 +622,7 @@ export default function App() {
         currentUser={currentUser}
         onOpenAuth={(isReg, role) => handleOpenAuth(isReg, role)}
         onLogout={handleLogout}
-        onOpenAiPharmacist={() => setShowAiPharmacistModal(true)}
+        onOpenAiPharmacist={() => handleOpenAiPharmacist(null, 'chat')}
         savedCount={currentUser?.savedPharmacyIds.length || 0}
       />
 
@@ -598,7 +645,8 @@ export default function App() {
             }}
             onOpenAuth={(isReg, role, notice) => handleOpenAuth(isReg, role, notice)}
             onNavigate={(tab) => handleNavigate(tab)}
-            onOpenAiPharmacist={() => setShowAiPharmacistModal(true)}
+            onOpenAiPharmacist={() => handleOpenAiPharmacist(null, 'chat')}
+            currentUser={currentUser}
           />
         )}
 
@@ -643,8 +691,8 @@ export default function App() {
             onOpenOrder={handleOpenOrder}
             onToggleBookmark={handleToggleBookmark}
             savedPharmacyIds={currentUser ? currentUser.savedPharmacyIds : []}
-            onOpenAiPharmacist={() => setShowAiPharmacistModal(true)}
-            onNotifyMe={handleOpenStockNotification}
+            onOpenAiPharmacist={() => handleOpenAiPharmacist(selectedMedicine, 'chat')}
+            onNotifyMe={(medicineName) => handleOpenStockNotification(medicineName)}
             onChangeSearch={handleChangeSearch}
             onNewSearch={handleNewSearch}
           />
@@ -665,6 +713,7 @@ export default function App() {
               setSelectedPharmacy(pharma);
               handleInitiateSearchFromHome();
             }}
+            onShowToast={showToast}
           />
         )}
 
@@ -773,6 +822,7 @@ export default function App() {
           pharmacy={orderPharmacy}
           medicine={orderMedicine}
           inventory={orderInventory}
+          currentUser={currentUser}
           onClose={() => setShowOrderModal(false)}
           onSubmitOrder={handleSubmitOrder}
         />
@@ -829,32 +879,35 @@ export default function App() {
         />
       )}
 
-      {/* Floating AI Assistant Trigger */}
-      <button
-        id="floating-ai-assistant-btn"
-        onClick={() => handleOpenAiPharmacist(null, 'chat')}
-        className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center justify-center gap-2 p-3 sm:px-4 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-700 text-white rounded-full sm:rounded-2xl shadow-xl shadow-emerald-950/25 hover:shadow-emerald-950/35 hover:scale-105 transition-all duration-200 cursor-pointer group border border-emerald-400/40"
-        title="Consult AI Pharmacist & Scan Rx"
-        aria-label="Open AI Pharmacist"
-      >
-        <div className="relative shrink-0">
-          <Sparkles className="w-5 h-5 text-amber-300 group-hover:rotate-12 transition-transform" />
-          <span className="absolute -top-1 -right-1 flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
-          </span>
-        </div>
-        <div className="text-left hidden sm:block">
-          <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 leading-none">Gemini 4 AI</p>
-          <p className="text-xs font-bold leading-tight">AI Pharmacist</p>
-        </div>
-      </button>
+      {/* Floating AI Assistant Trigger (hidden while any modal is open so it never overlaps dialogs) */}
+      {!isAnyModalOpen && (
+        <button
+          id="floating-ai-assistant-btn"
+          onClick={() => handleOpenAiPharmacist(null, 'chat')}
+          className="fixed bottom-5 right-4 sm:bottom-6 sm:right-6 z-30 flex items-center justify-center gap-2 p-3 sm:px-4 sm:py-3 bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 hover:from-emerald-700 hover:to-teal-700 text-white rounded-full sm:rounded-2xl shadow-xl shadow-emerald-950/25 hover:shadow-emerald-950/35 hover:scale-105 transition-all duration-200 cursor-pointer group border border-emerald-400/40"
+          title="Consult AI Pharmacist & Scan Rx"
+          aria-label="Open AI Pharmacist"
+        >
+          <div className="relative shrink-0">
+            <Sparkles className="w-5 h-5 text-amber-300 group-hover:rotate-12 transition-transform" />
+            <span className="absolute -top-1 -right-1 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-300 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+            </span>
+          </div>
+          <div className="text-left hidden sm:block">
+            <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-200 leading-none">Gemini 4 AI</p>
+            <p className="text-xs font-bold leading-tight">AI Pharmacist</p>
+          </div>
+        </button>
+      )}
 
-      {/* Global Toast Notification */}
+      {/* Single Global Toast Notification positioned safely below the sticky navbar */}
       {toastMessage && (
-        <div 
+        <div
           id="global-toast-notification"
-          className="fixed top-5 right-4 sm:top-6 sm:right-6 z-[10001] max-w-sm bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-2.5 animate-in slide-in-from-top-3 duration-200"
+          role="status"
+          className="fixed top-20 right-4 sm:right-6 z-[10001] max-w-sm bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-2.5 animate-in slide-in-from-top-3 duration-200"
         >
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span className="leading-snug">{toastMessage}</span>

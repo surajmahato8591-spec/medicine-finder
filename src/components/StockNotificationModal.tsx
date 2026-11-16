@@ -26,14 +26,14 @@ export const StockNotificationModal: React.FC<StockNotificationModalProps> = ({
   onClose,
   onSubscribeAlert,
 }) => {
-  if (!medicine) return null;
-
   const locString = typeof userLocation === 'string' ? userLocation : userLocation?.name || 'Mira Road East';
   const [contactMethod, setContactMethod] = useState<'SMS & WhatsApp' | 'Email'>('SMS & WhatsApp');
   const [phoneNumber, setPhoneNumber] = useState('+91 98765 43210');
   const [emailAddress, setEmailAddress] = useState('suraj.mahato@medifinder.demo');
   const [locationRadius, setLocationRadius] = useState('Within 5 km');
   const [isSuccess, setIsSuccess] = useState(false);
+
+  if (!medicine) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,7 +88,7 @@ export const StockNotificationModal: React.FC<StockNotificationModalProps> = ({
             </div>
             <h3 className="text-lg font-black text-slate-900">Alert Activated!</h3>
             <p className="text-xs text-slate-600 max-w-xs mx-auto leading-relaxed">
-              We will send you an instant {contactMethod === 'Email' ? 'email' : 'SMS/WhatsApp'} alert as soon as any registered chemist in <strong>{userLocation || 'Mira Road'}</strong> restocks <strong>{medicine.name}</strong>.
+              We will send you an instant {contactMethod === 'Email' ? 'email' : 'SMS/WhatsApp'} alert as soon as any registered chemist in <strong>{locString}</strong> restocks <strong>{medicine.name}</strong>.
             </p>
           </div>
         ) : (

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Store, 
@@ -43,11 +43,27 @@ export const PharmacyPortalModal: React.FC<PharmacyPortalModalProps> = ({
   const [stockQuantity, setStockQuantity] = useState('50');
   const [expiryDate, setExpiryDate] = useState('12/2027');
 
+  const targetPharmacy = pharmacies.find((p) => p.id === selectedPharmacyId) || pharmacies[0];
+
   // Update Stock Form Fields
-  const [selectedMedIdToUpdate, setSelectedMedIdToUpdate] = useState(medicines[0]?.id || '');
-  const [updateStockQty, setUpdateStockQty] = useState('45');
-  const [updateStatus, setUpdateStatus] = useState<PharmacyMedicineInventory['inStockStatus']>('In Stock');
-  const [updatePrice, setUpdatePrice] = useState('15.00');
+  const [selectedMedIdToUpdate, setSelectedMedIdToUpdate] = useState(
+    targetPharmacy?.inventory[0]?.medicineId || medicines[0]?.id || ''
+  );
+  const [updateStockQty, setUpdateStockQty] = useState(
+    targetPharmacy?.inventory[0]?.stockQuantity?.toString() || '45'
+  );
+  const [updatePrice, setUpdatePrice] = useState(
+    targetPharmacy?.inventory[0]?.price?.toString() || '15.00'
+  );
+
+  useEffect(() => {
+    const firstInv = targetPharmacy?.inventory[0];
+    if (firstInv) {
+      setSelectedMedIdToUpdate(firstInv.medicineId);
+      setUpdateStockQty(firstInv.stockQuantity.toString());
+      setUpdatePrice(firstInv.price.toString());
+    }
+  }, [selectedPharmacyId, targetPharmacy]);
 
   const handleAddMedicineSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -86,6 +102,7 @@ export const PharmacyPortalModal: React.FC<PharmacyPortalModalProps> = ({
 
   const handleUpdateStockSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedMedIdToUpdate) return;
     const qty = parseInt(updateStockQty, 10) || 0;
     const computedStatus: PharmacyMedicineInventory['inStockStatus'] =
       qty > 10 ? 'In Stock' : qty > 0 ? 'Low Stock' : 'Out of Stock';
@@ -100,8 +117,6 @@ export const PharmacyPortalModal: React.FC<PharmacyPortalModalProps> = ({
     setSuccessMsg('Stock levels updated successfully!');
     setTimeout(() => setSuccessMsg(''), 4000);
   };
-
-  const targetPharmacy = pharmacies.find((p) => p.id === selectedPharmacyId) || pharmacies[0];
 
   return (
     <div className="fixed inset-0 z-[10000] overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">

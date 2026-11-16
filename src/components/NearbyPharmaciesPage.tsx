@@ -1,16 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   MapPin, 
   Navigation, 
   Phone, 
-  Clock, 
   ShieldCheck, 
   Bookmark, 
   Star, 
-  Layers, 
   ChevronDown, 
-  Filter, 
-  SlidersHorizontal,
   ArrowRight,
   Sparkles,
   Search,
@@ -33,6 +29,7 @@ interface NearbyPharmaciesPageProps {
   onToggleBookmark: (pharmacyId: string) => void;
   savedPharmacyIds: string[];
   onOpenSearchForPharmacy: (pharmacy: Pharmacy) => void;
+  onShowToast?: (msg: string) => void;
 }
 
 export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
@@ -45,6 +42,7 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
   onToggleBookmark,
   savedPharmacyIds,
   onOpenSearchForPharmacy,
+  onShowToast,
 }) => {
   const [locationName, setLocationName] = useState(filters.location.name);
   const [radius, setRadius] = useState(filters.radiusKm);
@@ -56,6 +54,17 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
   const [viewMode, setViewMode] = useState<'split' | 'list' | 'map'>('split');
   const [isLocating, setIsLocating] = useState(false);
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(e.target as Node)) {
+        setShowLocationDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
 
   // Google Maps Grounded Live Place Discovery state
   const [mapsDiscoveryQuery, setMapsDiscoveryQuery] = useState('24-hour pharmacies and medical stores nearby');
@@ -82,7 +91,10 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
 
   const handleUseCurrentLocation = () => {
     if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
+      const fallback = POPULAR_LOCATIONS[0];
+      setLocationName(fallback.name);
+      setFilters((prev) => ({ ...prev, location: fallback }));
+      onShowToast?.('Browser geolocation is unavailable; centered on Mira Bhayandar.');
       return;
     }
     setIsLocating(true);
@@ -97,12 +109,14 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
         setLocationName(newLoc.name);
         setFilters((prev) => ({ ...prev, location: newLoc }));
         setIsLocating(false);
+        onShowToast?.('Updated map center to your current GPS location.');
       },
       () => {
         setIsLocating(false);
         const fallback = POPULAR_LOCATIONS[0];
         setLocationName(fallback.name);
         setFilters((prev) => ({ ...prev, location: fallback }));
+        onShowToast?.('Could not access GPS; centered on Mira Bhayandar.');
       },
       { timeout: 8000 }
     );
@@ -183,7 +197,7 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
             </div>
 
             {/* Location selector */}
-            <div className="sm:col-span-5 relative">
+            <div ref={locationDropdownRef} className="sm:col-span-5 relative">
               <label className="block text-xs font-extrabold text-slate-700 mb-1.5">
                 Current Center Location
               </label>
@@ -193,8 +207,15 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
                   type="text"
                   value={locationName}
                   onChange={(e) => {
-                    setLocationName(e.target.value);
+                    const val = e.target.value;
+                    setLocationName(val);
                     setShowLocationDropdown(true);
+                    const matchedLoc = POPULAR_LOCATIONS.find((l) =>
+                      l.name.toLowerCase().includes(val.trim().toLowerCase())
+                    );
+                    if (matchedLoc && val.trim().length >= 3) {
+                      setFilters((prev) => ({ ...prev, location: matchedLoc }));
+                    }
                   }}
                   onFocus={() => setShowLocationDropdown(true)}
                   className="w-full pl-9.5 pr-9 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-semibold text-slate-900"
@@ -315,15 +336,15 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
               <div className="flex items-center bg-white p-1 rounded-xl border border-slate-200 shadow-xs text-xs font-bold shrink-0">
                 <button
                   onClick={() => setViewMode('split')}
-                  className={`hidden lg:block px-2.5 py-1 rounded-lg transition-all ${
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'split' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
-                  Split View
+                  Split
                 </button>
                 <button
                   onClick={() => setViewMode('list')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'list' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >
@@ -331,7 +352,7 @@ export const NearbyPharmaciesPage: React.FC<NearbyPharmaciesPageProps> = ({
                 </button>
                 <button
                   onClick={() => setViewMode('map')}
-                  className={`px-2.5 py-1 rounded-lg transition-all ${
+                  className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                     viewMode === 'map' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                   }`}
                 >

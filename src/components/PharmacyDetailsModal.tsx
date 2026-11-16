@@ -42,11 +42,11 @@ export const PharmacyDetailsModal: React.FC<PharmacyDetailsModalProps> = ({
   isSaved,
   onSelectMedicine,
 }) => {
-  if (!pharmacy) return null;
-
   const [activeTab, setActiveTab] = useState<'overview' | 'inventory'>('overview');
   const [inventorySearch, setInventorySearch] = useState('');
   const [copiedShare, setCopiedShare] = useState(false);
+
+  if (!pharmacy) return null;
 
   const searchedInv = searchedMedicine
     ? pharmacy.inventory.find((i) => i.medicineId === searchedMedicine.id)
@@ -305,7 +305,11 @@ export const PharmacyDetailsModal: React.FC<PharmacyDetailsModalProps> = ({
                       <div className="flex items-center gap-3">
                         <div className="text-right">
                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            item.inStockStatus === 'In Stock' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                            item.inStockStatus === 'In Stock'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : item.inStockStatus === 'Low Stock'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-rose-100 text-rose-800'
                           }`}>
                             {item.inStockStatus}
                           </span>
@@ -313,11 +317,18 @@ export const PharmacyDetailsModal: React.FC<PharmacyDetailsModalProps> = ({
                         </div>
 
                         <button
+                          disabled={item.inStockStatus === 'Out of Stock'}
                           onClick={() => {
-                            if (item.medicine) onOpenOrder(pharmacy, item.medicine, item);
+                            if (item.medicine && item.inStockStatus !== 'Out of Stock') {
+                              onOpenOrder(pharmacy, item.medicine, item);
+                            }
                           }}
-                          className="p-2 bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 rounded-lg transition-colors"
-                          title="Reserve medicine"
+                          className={`p-2 rounded-lg transition-colors ${
+                            item.inStockStatus === 'Out of Stock'
+                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                              : 'bg-emerald-50 hover:bg-emerald-600 hover:text-white text-emerald-700 cursor-pointer'
+                          }`}
+                          title={item.inStockStatus === 'Out of Stock' ? 'Currently out of stock' : 'Reserve medicine'}
                         >
                           <ShoppingCart className="w-4 h-4" />
                         </button>

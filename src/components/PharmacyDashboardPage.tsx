@@ -111,7 +111,7 @@ export const PharmacyDashboardPage: React.FC<PharmacyDashboardPageProps> = ({
 
   const handleAddMedicineSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!medName.trim()) return;
+    if (!currentPharmacy || !medName.trim()) return;
 
     const newMedId = `med-custom-${Date.now()}`;
     const newMedicine: Medicine = {
@@ -150,6 +150,7 @@ export const PharmacyDashboardPage: React.FC<PharmacyDashboardPageProps> = ({
   };
 
   const handleAdjustQuantity = (medId: string, currentQty: number, delta: number, currentPrice: number) => {
+    if (!currentPharmacy) return;
     const newQty = Math.max(0, currentQty + delta);
     // Quantity rules: > 10 In Stock, 1-10 Low Stock, 0 Out of Stock
     const newStatus: PharmacyMedicineInventory['inStockStatus'] =
@@ -172,7 +173,7 @@ export const PharmacyDashboardPage: React.FC<PharmacyDashboardPageProps> = ({
 
   const handleDirectStockUpdate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!stockUpdateMedicineId) return;
+    if (!currentPharmacy || !stockUpdateMedicineId) return;
 
     const qty = Math.max(0, Number(stockUpdateQty) || 0);
     const newStatus: PharmacyMedicineInventory['inStockStatus'] =

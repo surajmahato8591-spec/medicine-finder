@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   PlusCircle, 
   User, 
@@ -9,10 +9,7 @@ import {
   Clock,
   ShieldCheck,
   Sparkles,
-  LogOut,
-  Bookmark,
-  Calendar,
-  Pill
+  LogOut
 } from 'lucide-react';
 import { UserProfile, UserRole } from '../types';
 
@@ -49,11 +46,35 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const handleOutside = (e: MouseEvent) => {
+      if (headerRef.current && !headerRef.current.contains(e.target as Node)) {
+        setShowNotifications(false);
+        setShowUserDropdown(false);
+        setMobileMenuOpen(false);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowNotifications(false);
+        setShowUserDropdown(false);
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutside);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleOutside);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, []);
 
   const isSearchActive = activeTab === 'search' || activeTab === 'search-results';
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+    <header ref={headerRef} className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-18">
           {/* Brand Logo */}
@@ -228,7 +249,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="relative">
                 <button
                   id="navbar-notification-btn"
-                  onClick={() => setShowNotifications(!showNotifications)}
+                  onClick={() => {
+                    setShowNotifications((prev) => !prev);
+                    setShowUserDropdown(false);
+                    setMobileMenuOpen(false);
+                  }}
                   className="p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors relative cursor-pointer"
                   aria-label="View notifications"
                 >
@@ -273,7 +298,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="relative">
                 <button
                   id="navbar-user-profile-btn"
-                  onClick={() => setShowUserDropdown(!showUserDropdown)}
+                  onClick={() => {
+                    setShowUserDropdown((prev) => !prev);
+                    setShowNotifications(false);
+                    setMobileMenuOpen(false);
+                  }}
                   className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 transition-all cursor-pointer"
                 >
                   <img
@@ -375,7 +404,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Mobile Drawer Toggle */}
             <button
               id="mobile-menu-toggle-btn"
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              onClick={() => {
+                setMobileMenuOpen((prev) => !prev);
+                setShowNotifications(false);
+                setShowUserDropdown(false);
+              }}
               className="lg:hidden p-2 text-slate-600 hover:text-slate-900 rounded-lg hover:bg-slate-100 shrink-0"
               aria-label="Toggle navigation menu"
             >

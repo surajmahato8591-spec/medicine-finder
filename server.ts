@@ -1,7 +1,7 @@
 import express, { type Request, type Response } from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel, Type } from "@google/genai";
 import { 
   INITIAL_PHARMACIES, 
   INITIAL_MEDICINES, 
@@ -33,6 +33,24 @@ function getGeminiClient(): GoogleGenAI {
   return aiClient;
 }
 
+function extractGeminiErrorNotice(err: any): string {
+  const status = err?.status || err?.code;
+  const msg = String(err?.message || "");
+  if (status === 429 || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("quota")) {
+    return "Gemini API quota limit reached (429). You can select a billing-enabled API key in Settings > Secrets for higher limits; showing local clinical reference meanwhile.";
+  }
+  if (status === 403 || status === 400 || msg.includes("PERMISSION_DENIED") || msg.includes("API_KEY_INVALID")) {
+    return "Gemini API key permission or configuration issue detected. Please verify your API key in Settings > Secrets.";
+  }
+  return "Live Gemini service is temporarily busy; showing verified local clinical reference.";
+}
+
+function safeParseJson(text: string | undefined, fallback: any = {}): any {
+  if (!text) return fallback;
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  return JSON.parse(cleaned || "{}");
+}
+
 // Resilient Gemini Model Invocation with Immediate Model Failover (gemini-4-hydrogen -> gemini-3.1-flash-lite)
 async function callGeminiWithRetry(params: any): Promise<any> {
   const ai = getGeminiClient();
@@ -58,14 +76,17 @@ async function callGeminiWithRetry(params: any): Promise<any> {
         err?.code === 503 ||
         err?.status === 429 ||
         err?.code === 429 ||
+        err?.status === 400 ||
         errorMsg.includes("503") ||
+        errorMsg.includes("429") ||
         errorMsg.includes("high demand") ||
         errorMsg.includes("UNAVAILABLE") ||
+        errorMsg.includes("RESOURCE_EXHAUSTED") ||
         errorMsg.includes("Resource has been exhausted") ||
         errorMsg.includes("temporarily");
 
       if (isTransient) {
-        console.warn(`[Gemini API] Model ${modelName} transient demand spike (${err?.status || err?.code || 503}). Failing over to alternative Gemini model...`);
+        console.info(`[Gemini API] Model ${modelName} unavailable (${err?.status || err?.code || "transient"}), trying next model...`);
         continue;
       }
       throw err;
@@ -524,14 +545,27 @@ ${userContext ? `User Context: ${JSON.stringify(userContext)}` : ''}
 Available local catalogue medicines: ${serverMedicines.map(m => `${m.name} (${m.genericName}) - ₹${m.defaultPrice}`).join(', ')}`;
 
     try {
-      const response = await callGeminiWithRetry({
-        model: "gemini-4-hydrogen",
-        contents: prompt,
-        config: {
-          systemInstruction: systemPrompt,
-          tools: [{ googleSearch: {} }],
-        },
-      });
+      let response: any;
+      try {
+        response = await callGeminiWithRetry({
+          model: "gemini-4-hydrogen",
+          contents: prompt,
+          config: {
+            systemInstruction: systemPrompt,
+            tools: [{ googleSearch: {} }],
+          },
+        });
+      } catch (groundedErr: any) {
+        console.info("[Gemini API] Search grounding unavailable for /api/ai/pharmacist; retrying standard Gemini generation.");
+        response = await callGeminiWithRetry({
+          model: "gemini-4-hydrogen",
+          contents: prompt,
+          config: {
+            systemInstruction: systemPrompt,
+            thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+          },
+        });
+      }
 
       const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
       const sources = chunks
@@ -543,17 +577,19 @@ Available local catalogue medicines: ${serverMedicines.map(m => `${m.name} (${m.
 
       return res.json({
         success: true,
-        reply: response.text,
+        reply: response.text || generatePharmacistFallback(message, medicineName),
         sources,
       });
     } catch (error: any) {
-      console.warn("[Gemini API] Serving clinical fallback for /api/ai/pharmacist due to upstream provider high demand:", error?.message || error);
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving clinical fallback for /api/ai/pharmacist (${error?.status || error?.code || "upstream limit"})`);
       const fallbackReply = generatePharmacistFallback(message, medicineName);
       return res.json({
         success: true,
         reply: fallbackReply,
         sources: [],
         isFallback: true,
+        apiNotice,
       });
     }
   });
@@ -569,6 +605,9 @@ Available local catalogue medicines: ${serverMedicines.map(m => `${m.name} (${m.
       parsedLng !== undefined &&
       !Number.isNaN(parsedLat) &&
       !Number.isNaN(parsedLng);
+
+    const refLat = hasLatLng ? (parsedLat as number) : 19.2952;
+    const refLng = hasLatLng ? (parsedLng as number) : 72.8544;
 
     try {
       const config: any = {
@@ -588,42 +627,79 @@ Available local catalogue medicines: ${serverMedicines.map(m => `${m.name} (${m.
         };
       }
 
-      const response = await callGeminiWithRetry({
-        model: "gemini-4-hydrogen",
-        contents: searchQuery,
-        config,
-      });
+      try {
+        const response = await callGeminiWithRetry({
+          model: "gemini-4-hydrogen",
+          contents: searchQuery,
+          config,
+        });
 
-      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-      const mapsPlaces = chunks
-        .filter((c: any) => c.maps?.uri || c.maps?.title)
-        .map((c: any) => ({
-          title: c.maps.title || "Pharmacy Location",
-          uri: c.maps.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.maps.title || searchQuery)}`,
-          placeId: c.maps.placeId || undefined,
-          reviewSnippets: (c.maps.placeAnswerSources?.reviewSnippets || [])
-            .filter((r: any) => r?.uri)
-            .map((r: any) => ({
-              title: r.title || "Google Maps Review",
-              uri: r.uri,
-            })),
-        }));
+        const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+        const mapsPlaces = chunks
+          .filter((c: any) => c.maps?.uri || c.maps?.title)
+          .map((c: any) => ({
+            title: c.maps.title || "Pharmacy Location",
+            uri: c.maps.uri || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.maps.title || searchQuery)}`,
+            placeId: c.maps.placeId || undefined,
+            reviewSnippets: (c.maps.placeAnswerSources?.reviewSnippets || [])
+              .filter((r: any) => r?.uri)
+              .map((r: any) => ({
+                title: r.title || "Google Maps Review",
+                uri: r.uri,
+              })),
+          }));
 
-      return res.json({
-        success: true,
-        reply: response.text || "Here are pharmacies found near your selected location.",
-        mapsPlaces,
-      });
+        return res.json({
+          success: true,
+          reply: response.text || "Here are pharmacies found near your selected location.",
+          mapsPlaces,
+        });
+      } catch (mapsToolErr: any) {
+        console.info("[Gemini API] Maps grounding tool unavailable; retrying with local verified pharmacy context.");
+        const nearbyPharmacies = [...serverPharmacies]
+          .map((p) => ({
+            ...p,
+            distanceKm: calculateDistance(refLat, refLng, p.lat, p.lng),
+          }))
+          .sort((a, b) => a.distanceKm - b.distanceKm)
+          .slice(0, 5);
+
+        const ungroundedResponse = await callGeminiWithRetry({
+          model: "gemini-4-hydrogen",
+          contents: `User query: "${searchQuery}" near coordinates (${refLat.toFixed(4)}, ${refLng.toFixed(4)}).
+Verified nearby pharmacies in our directory:
+${nearbyPharmacies.map((p) => `- ${p.name} (${p.area}) — ${p.distanceKm} km away, Hours: ${p.openHours}, 24x7: ${p.is24x7 ? "Yes" : "No"}, Rating: ${p.rating}`).join("\n")}
+
+Respond in clean Markdown recommending the best matching pharmacies from this list for the user's query.`,
+          config: {
+            systemInstruction:
+              "You are MediFinder's local pharmacy assistant. Recommend the most suitable nearby verified pharmacies clearly in Markdown.",
+            thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          },
+        });
+
+        return res.json({
+          success: true,
+          reply: ungroundedResponse.text || "Here are verified pharmacies near your selected location.",
+          mapsPlaces: nearbyPharmacies.map((p) => ({
+            title: `${p.name} (${p.area})`,
+            uri: `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`,
+            reviewSnippets: [],
+          })),
+        });
+      }
     } catch (error: any) {
-      console.warn("[Gemini API] Serving local fallback for /api/ai/maps-places:", error?.message || error);
-      const refLat = hasLatLng ? (parsedLat as number) : 19.2952;
-      const refLng = hasLatLng ? (parsedLng as number) : 72.8544;
-      const fallbackPlaces = serverPharmacies.slice(0, 4).map((p) => ({
-        title: `${p.name} (${p.area})`,
-        uri: `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`,
-        reviewSnippets: [],
-        distanceKm: calculateDistance(refLat, refLng, p.lat, p.lng),
-      }));
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving local fallback for /api/ai/maps-places (${error?.status || error?.code || "upstream limit"})`);
+      const fallbackPlaces = [...serverPharmacies]
+        .map((p) => ({
+          title: `${p.name} (${p.area})`,
+          uri: `https://www.google.com/maps/search/?api=1&query=${p.lat},${p.lng}`,
+          reviewSnippets: [],
+          distanceKm: calculateDistance(refLat, refLng, p.lat, p.lng),
+        }))
+        .sort((a, b) => a.distanceKm - b.distanceKm)
+        .slice(0, 4);
 
       return res.json({
         success: true,
@@ -635,6 +711,7 @@ Available local catalogue medicines: ${serverMedicines.map(m => `${m.name} (${m.
           reviewSnippets,
         })),
         isFallback: true,
+        apiNotice,
       });
     }
   });
@@ -663,6 +740,7 @@ Return a structured JSON with:
 - "genericAlternative": Generic composition name.
 - "warning": Crucial safety notice or prescription necessity.`,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -698,7 +776,10 @@ Return a structured JSON with:
         },
       });
 
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = safeParseJson(response.text, null);
+      if (!parsed || !parsed.primaryRecommendation) {
+        throw new Error("Incomplete smart-search JSON payload");
+      }
 
       // Find pharmacies that stock these matched medicines
       const matchedMeds = serverMedicines.filter((m) =>
@@ -711,13 +792,15 @@ Return a structured JSON with:
         matchedMedicines: matchedMeds.length > 0 ? matchedMeds : [serverMedicines[0]],
       });
     } catch (error: any) {
-      console.warn("[Gemini API] Serving clinical fallback for /api/ai/smart-search due to upstream provider high demand:", error?.message || error);
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving clinical fallback for /api/ai/smart-search (${error?.status || error?.code || "upstream limit"})`);
       const fallbackResult = generateSmartSearchFallback(naturalQuery);
       return res.json({
         success: true,
         aiAnalysis: fallbackResult.aiAnalysis,
         matchedMedicines: fallbackResult.matchedMedicines,
         isFallback: true,
+        apiNotice,
       });
     }
   });
@@ -769,6 +852,7 @@ Return a structured JSON with:
         model: "gemini-4-hydrogen",
         contents: { parts },
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -802,19 +886,24 @@ Return a structured JSON with:
         },
       });
 
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = safeParseJson(response.text, null);
+      if (!parsed || !Array.isArray(parsed.medicines)) {
+        throw new Error("Incomplete prescription JSON payload");
+      }
 
       return res.json({
         success: true,
         prescription: parsed,
       });
     } catch (error: any) {
-      console.warn("[Gemini API] Serving clinical fallback for /api/ai/scan-prescription due to upstream provider high demand:", error?.message || error);
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving clinical fallback for /api/ai/scan-prescription (${error?.status || error?.code || "upstream limit"})`);
       const fallbackPrescription = generatePrescriptionFallback(rawText);
       return res.json({
         success: true,
         prescription: fallbackPrescription,
         isFallback: true,
+        apiNotice,
       });
     }
   });
@@ -840,6 +929,7 @@ Return a structured JSON with:
 - "substitutes": array of objects { name, manufacturer, approxPriceInr, bioequivalentRating, notes }
 - "pharmacistVerdict": string (clinical summary on whether generic switch is safe)`,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -869,18 +959,23 @@ Return a structured JSON with:
         },
       });
 
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = safeParseJson(response.text, null);
+      if (!parsed || !Array.isArray(parsed.substitutes)) {
+        throw new Error("Incomplete substitutes JSON payload");
+      }
       return res.json({
         success: true,
         data: parsed,
       });
     } catch (error: any) {
-      console.warn("[Gemini API] Serving clinical fallback for /api/ai/substitutes due to upstream provider high demand:", error?.message || error);
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving clinical fallback for /api/ai/substitutes (${error?.status || error?.code || "upstream limit"})`);
       const fallbackSubs = generateSubstitutesFallback(medicineName, currentPrice);
       return res.json({
         success: true,
         data: fallbackSubs,
         isFallback: true,
+        apiNotice,
       });
     }
   });
@@ -905,6 +1000,7 @@ Return structured JSON with:
 - "foodAndAlcoholWarnings": array of strings
 - "timingRecommendations": string`,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.MINIMAL },
           responseMimeType: "application/json",
           responseSchema: {
             type: Type.OBJECT,
@@ -935,18 +1031,23 @@ Return structured JSON with:
         },
       });
 
-      const parsed = JSON.parse(response.text || "{}");
+      const parsed = safeParseJson(response.text, null);
+      if (!parsed || !parsed.overallSafetyLevel || !Array.isArray(parsed.interactions)) {
+        throw new Error("Incomplete interactions JSON payload");
+      }
       return res.json({
         success: true,
         data: parsed,
       });
     } catch (error: any) {
-      console.warn("[Gemini API] Serving clinical fallback for /api/ai/check-interactions due to upstream provider high demand:", error?.message || error);
+      const apiNotice = extractGeminiErrorNotice(error);
+      console.info(`[Gemini API] Serving clinical fallback for /api/ai/check-interactions (${error?.status || error?.code || "upstream limit"})`);
       const fallbackInteractions = generateInteractionsFallback(medicineNames);
       return res.json({
         success: true,
         data: fallbackInteractions,
         isFallback: true,
+        apiNotice,
       });
     }
   });

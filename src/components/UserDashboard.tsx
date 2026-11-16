@@ -185,7 +185,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                   <span>Restock Alerts</span>
                 </div>
                 <span className={`text-[10px] px-2 py-0.5 rounded-full ${activeTab === 'alerts' ? 'bg-emerald-700 text-white' : 'bg-slate-100 text-slate-700'}`}>
-                  {user.stockAlerts ? user.stockAlerts.length : 2}
+                  {user.stockAlerts ? user.stockAlerts.length : 0}
                 </span>
               </button>
             </div>

@@ -22,7 +22,7 @@ import {
   Bot,
   FileText
 } from 'lucide-react';
-import { SearchFilters, Medicine, Pharmacy, UserRole } from '../types';
+import { SearchFilters, Medicine, Pharmacy, UserRole, UserProfile } from '../types';
 import { POPULAR_LOCATIONS } from '../data/mockData';
 import { AboutSection } from './AboutSection';
 
@@ -40,6 +40,7 @@ interface LandingPageProps {
   onOpenAuth: (isRegister?: boolean, role?: UserRole, notice?: string | null) => void;
   onNavigate: (tab: 'home' | 'search' | 'search-results' | 'nearby-pharmacies' | 'dashboard' | 'pharmacy-dashboard' | 'admin-dashboard' | 'about' | 'how-it-works') => void;
   onOpenAiPharmacist?: () => void;
+  currentUser?: UserProfile | null;
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({
@@ -51,6 +52,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({
   onOpenAuth,
   onNavigate,
   onOpenAiPharmacist,
+  currentUser = null,
 }) => {
   const [medicineQuery, setMedicineQuery] = useState(filters?.query || 'Paracetamol 650mg');
   const [locationName, setLocationName] = useState(filters?.location?.name || 'Mira Bhayandar, Maharashtra');
@@ -223,15 +225,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({
               </div>
 
               {/* Hero Action Buttons */}
-              <div className="flex items-center gap-3 pt-1">
-                <button
-                  id="hero-primary-login-btn"
-                  onClick={() => onOpenAuth(false, 'patient', "Please log in or register to search live medicine availability.")}
-                  className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer"
-                >
-                  <Lock className="w-4 h-4" />
-                  <span>Login to Find Medicine</span>
-                </button>
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                {currentUser ? (
+                  <button
+                    id="hero-primary-search-btn"
+                    onClick={() => onNavigate('search')}
+                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <Search className="w-4 h-4" />
+                    <span>Search Medicines</span>
+                  </button>
+                ) : (
+                  <button
+                    id="hero-primary-login-btn"
+                    onClick={() => onOpenAuth(false, 'patient', "Please log in or register to search live medicine availability.")}
+                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl shadow-md shadow-emerald-600/20 transition-all flex items-center gap-2 cursor-pointer"
+                  >
+                    <Lock className="w-4 h-4" />
+                    <span>Login to Find Medicine</span>
+                  </button>
+                )}
                 <button
                   id="hero-secondary-how-it-works-btn"
                   onClick={() => scrollToSection('how-it-works-section')}
@@ -330,8 +343,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                           type="text"
                           value={locationName}
                           onChange={(e) => {
-                            setLocationName(e.target.value);
+                            const val = e.target.value;
+                            setLocationName(val);
                             setShowLocationDropdown(true);
+                            const matchedLoc = POPULAR_LOCATIONS.find((l) =>
+                              l.name.toLowerCase().includes(val.trim().toLowerCase())
+                            );
+                            if (matchedLoc && val.trim().length >= 3) {
+                              setFilters((prev) => ({ ...prev, location: matchedLoc }));
+                            }
                           }}
                           onFocus={() => setShowLocationDropdown(true)}
                           placeholder="Area or locality"
@@ -527,13 +547,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({
                   </div>
 
                   <div className="pt-2 flex items-center justify-between text-xs">
-                    <button
-                      onClick={() => onOpenAuth(false, 'patient', "Please log in or register to access nearby pharmacies and live maps.")}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
-                    >
-                      <Lock className="w-3.5 h-3.5" />
-                      <span>Log In to Access Live Map & Stock</span>
-                    </button>
+                    {currentUser ? (
+                      <button
+                        onClick={() => onNavigate('nearby-pharmacies')}
+                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <MapPin className="w-3.5 h-3.5" />
+                        <span>Open Live Map & Pharmacies</span>
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => onOpenAuth(false, 'patient', "Please log in or register to access nearby pharmacies and live maps.")}
+                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Log In to Access Live Map & Stock</span>
+                      </button>
+                    )}
                   </div>
 
                 </div>

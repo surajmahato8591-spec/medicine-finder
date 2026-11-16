@@ -292,15 +292,15 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
             <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200 text-xs font-bold shrink-0">
               <button
                 onClick={() => setViewMode('split')}
-                className={`hidden lg:block px-2.5 py-1 rounded-lg transition-all ${
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   viewMode === 'split' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Split View
+                Split
               </button>
               <button
                 onClick={() => setViewMode('list')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   viewMode === 'list' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
@@ -308,7 +308,7 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({
               </button>
               <button
                 onClick={() => setViewMode('map')}
-                className={`px-2.5 py-1 rounded-lg transition-all ${
+                className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
                   viewMode === 'map' ? 'bg-white text-slate-900 shadow-xs font-extrabold' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
